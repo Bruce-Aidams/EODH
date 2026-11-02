@@ -23,8 +23,6 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "package": "com.eodh.app",
-      "edgeToEdgeEnabled": true,
-      "predictiveBackGesture": false,
       "permissions": [
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
