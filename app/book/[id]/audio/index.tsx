@@ -1,0 +1,821 @@
+import { useEffect, useState, useCallback } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  Image,
+  SafeAreaView,
+  StatusBar,
+  ActivityIndicator,
+} from 'react-native';
+import Slider from '@react-native-community/slider';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { supabase } from '@/lib/supabase/client';
+import { useAudioStore } from '@/stores/audioStore';
+import { useLibraryStore } from '@/stores/libraryStore';
+import { useSettingsStore } from '@/stores/settingsStore';
+import { Book, AudioSegment } from '@/types';
+import { COLORS, SPACING, BORDER_RADIUS } from '@/constants/theme';
+import { Ionicons } from '@expo/vector-icons';
+import { useCompleteAudioPlayer } from '@/lib/audio/player';
+import { useMediaControls } from '@/lib/audio/mediaControls';
+import { useAudioQueue } from '@/lib/audio/queue';
+import { getAudioSegmentUri } from '@/lib/offline/fileManager';
+
+/**
+ * Audio Player Screen with real expo-audio playback.
+ *
+ * Each audio segment (chapter) is played individually. When one segment
+ * finishes, the player automatically advances to the next segment.
+ * Progress is saved to Supabase every few seconds.
+ */
+export default function AudioPlayerScreen() {
+  const { id } = useLocalSearchParams();
+  const router = useRouter();
+  const { updateListeningProgress } = useLibraryStore();
+  const { audioSettings } = useSettingsStore();
+  const {
+    currentTime: storeTime,
+    setBufferStatus,
+    setPlaybackSpeed,
+    setSegments,
+    reset,
+  } = useAudioStore();
+
+  const [book, setBook] = useState<Book | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [bookSegments, setBookSegments] = useState<AudioSegment[]>([]);
+  const [resolvedAudioUris, setResolvedAudioUris] = useState<string[]>([]);
+  const [currentSegmentIndex, setCurrentSegmentIndex] = useState(0);
+  const [totalDuration, setTotalDuration] = useState(0);
+  const [isShuffled, setIsShuffled] = useState(false);
+  const [repeatMode, setRepeatMode] = useState<'none' | 'all' | 'one'>('none');
+
+  const bookId = Array.isArray(id) ? id[0] : id;
+
+  // Build the current audio URI from the active segment (uses local file if available)
+  const currentSegment = bookSegments[currentSegmentIndex] || null;
+  const currentAudioUri = resolvedAudioUris[currentSegmentIndex] || currentSegment?.audio_url || null;
+
+  // Calculate total duration from all segments
+  useEffect(() => {
+    const total = bookSegments.reduce((sum, seg) => {
+      return sum + (seg.end_time - seg.start_time);
+    }, 0);
+    setTotalDuration(total);
+  }, [bookSegments]);
+
+  // Determine current segment index based on playback time
+  useEffect(() => {
+    if (bookSegments.length === 0) return;
+    const time = storeTime;
+    for (let i = bookSegments.length - 1; i >= 0; i--) {
+      if (time >= bookSegments[i].start_time) {
+        if (i !== currentSegmentIndex) {
+          setCurrentSegmentIndex(i);
+        }
+        break;
+      }
+    }
+  }, [storeTime, bookSegments]);
+
+  // Real audio player hook — keyed on segment so it reloads when segment changes
+  const {
+    isPlaying,
+    isLoaded,
+    isBuffering,
+    currentTime,
+    duration,
+    playbackRate,
+    play,
+    pause,
+    seekTo,
+    setPlaybackRate,
+    didJustFinish,
+  } = useCompleteAudioPlayer(
+    currentAudioUri,
+    audioSettings.playbackSpeed,
+    {
+      onPositionChange: (time) => {
+        // Map segment-local time to global time
+        if (currentSegment) {
+          const globalTime = currentSegment.start_time + time;
+          // Update store with global time
+          useAudioStore.setState({ currentTime: globalTime });
+        }
+      },
+      onDurationChange: (dur) => {
+        useAudioStore.setState({ duration: dur });
+      },
+      onBufferingChange: (buf) => {
+        setBufferStatus(buf ? 'buffering' : 'ready');
+      },
+      onPlay: () => {
+        useAudioStore.setState({ isPlaying: true });
+      },
+      onPause: () => {
+        useAudioStore.setState({ isPlaying: false });
+      },
+      onPlaybackEnd: () => {
+        // Handle repeat mode
+        if (repeatMode === 'one') {
+          // Repeat current segment
+          seekTo(0);
+          play();
+          return;
+        }
+
+        // Auto-advance to next segment
+        if (currentSegmentIndex < bookSegments.length - 1) {
+          const nextIndex = currentSegmentIndex + 1;
+          setCurrentSegmentIndex(nextIndex);
+        } else {
+          // Last segment finished
+          if (repeatMode === 'all') {
+            // Loop back to beginning
+            setCurrentSegmentIndex(0);
+          } else {
+            // All segments finished, stop playback
+            useAudioStore.setState({ isPlaying: false });
+          }
+        }
+      },
+    },
+    currentSegmentIndex // key dependency — changes cause re-mount with new segment
+  );
+
+  // Sync store state with real player state
+  useEffect(() => {
+    useAudioStore.setState({ isPlaying });
+  }, [isPlaying]);
+
+  useEffect(() => {
+    if (currentSegment) {
+      const globalTime = currentSegment.start_time + currentTime;
+      useAudioStore.setState({ currentTime: globalTime });
+    }
+  }, [currentTime, currentSegment]);
+
+  // Auto-save listening progress every 5 seconds
+  useEffect(() => {
+    if (!isPlaying || !book) return;
+
+    const timer = setInterval(() => {
+      const globalTime = currentSegment ? currentSegment.start_time + currentTime : currentTime;
+      const progressPercent = totalDuration > 0 ? (globalTime / totalDuration) * 100 : 0;
+      updateListeningProgress({
+        book_id: bookId,
+        current_time: globalTime,
+        progress_percent: Math.min(progressPercent, 100),
+      });
+    }, 5000);
+
+    return () => clearInterval(timer);
+  }, [isPlaying, book, bookId, currentTime, currentSegment, totalDuration, updateListeningProgress]);
+
+  useEffect(() => {
+    fetchBook();
+    return () => {
+      pause();
+      reset();
+    };
+  }, [bookId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const fetchBook = async () => {
+    setLoading(true);
+    try {
+      const { data: bookData } = await supabase
+        .from('books')
+        .select('*')
+        .eq('id', bookId)
+        .single();
+
+      if (bookData) {
+        setBook(bookData);
+
+        // Fetch audio segments
+        const { data: segData } = await supabase
+          .from('audio_segments')
+          .select('*')
+          .eq('book_id', bookId)
+          .order('order_index', { ascending: true });
+
+        if (segData && segData.length > 0) {
+          setBookSegments(segData);
+          setSegments(segData);
+
+          // Resolve audio URIs — check for locally downloaded files first
+          const uris: string[] = [];
+          for (let i = 0; i < segData.length; i++) {
+            const segment = segData[i];
+            const localUri = await getAudioSegmentUri(bookId, i + 1, segment.audio_url);
+            uris.push(localUri || segment.audio_url || '');
+          }
+          setResolvedAudioUris(uris);
+        }
+      }
+    } catch {
+      // Book not found
+    }
+    setLoading(false);
+  };
+
+  const handlePlayPause = useCallback(() => {
+    if (bookSegments.length === 0) return;
+    if (isPlaying) {
+      pause();
+    } else {
+      play();
+    }
+  }, [isPlaying, play, pause, bookSegments.length]);
+
+  const handleSeek = (value: number) => {
+    // Map global time to segment-local time
+    if (bookSegments.length === 0) return;
+
+    // Find which segment this time falls in
+    let accumulatedTime = 0;
+    for (const seg of bookSegments) {
+      const segDuration = seg.end_time - seg.start_time;
+      if (value >= accumulatedTime && value < accumulatedTime + segDuration) {
+        const segIndex = bookSegments.indexOf(seg);
+        const localTime = value - accumulatedTime;
+        setCurrentSegmentIndex(segIndex);
+        seekTo(localTime);
+        return;
+      }
+      accumulatedTime += segDuration;
+    }
+    // If beyond all segments, seek to end of last segment
+    const lastSeg = bookSegments[bookSegments.length - 1];
+    setCurrentSegmentIndex(bookSegments.length - 1);
+    seekTo(Math.min(currentTime, duration));
+  };
+
+  const handleSpeedChange = () => {
+    const speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
+    const currentIndex = speeds.indexOf(audioSettings.playbackSpeed);
+    const nextSpeed = speeds[(currentIndex + 1) % speeds.length];
+    setPlaybackRate(nextSpeed);
+    setPlaybackSpeed(nextSpeed);
+    useSettingsStore.setState((s) => ({
+      ...s,
+      audioSettings: { ...s.audioSettings, playbackSpeed: nextSpeed },
+    }));
+  };
+
+  const handleSkipForward = () => {
+    const newTime = Math.min(currentTime + 10, totalDuration);
+    handleSeek(newTime);
+  };
+
+  const handleSkipBackward = () => {
+    const newTime = Math.max(currentTime - 10, 0);
+    handleSeek(newTime);
+  };
+
+  // Shuffle toggle
+  const handleShuffle = () => {
+    setIsShuffled(!isShuffled);
+  };
+
+  // Cycle repeat mode: none -> all -> one -> none
+  const handleRepeat = () => {
+    setRepeatMode(prev => {
+      if (prev === 'none') return 'all';
+      if (prev === 'all') return 'one';
+      return 'none';
+    });
+  };
+
+  // Get the display index for the current segment (for shuffled mode)
+  const getDisplayIndex = (index: number) => {
+    if (!isShuffled || bookSegments.length === 0) return index;
+    // Generate shuffled order (same algorithm as queue.ts)
+    const order = Array.from({ length: bookSegments.length }, (_, i) => i);
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+    return order[index];
+  };
+
+  // Lock-screen media controls and headphone integration
+  useMediaControls({
+    title: book?.title || 'Unknown',
+    artist: book?.author || 'Unknown',
+    album: 'EODH Audiobooks',
+    isPlaying,
+    onPlay: () => {
+      if (bookSegments.length > 0) play();
+    },
+    onPause: pause,
+    onNext: handleSkipForward,
+    onPrevious: handleSkipBackward,
+    onSeek: (position) => handleSeek(position),
+    onStop: () => {
+      pause();
+      seekTo(0);
+    },
+  });
+
+  const formatTime = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // Calculate global time for display
+  const globalTime = currentSegment ? currentSegment.start_time + currentTime : currentTime;
+  const displayDuration = totalDuration || duration;
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color={COLORS.royalPurple} />
+      </SafeAreaView>
+    );
+  }
+
+  if (!book) {
+    return (
+      <SafeAreaView style={styles.emptyContainer}>
+        <Ionicons name="headset-outline" size={64} color={COLORS.gray300} />
+        <Text style={styles.emptyTitle}>Audio Not Available</Text>
+        <Text style={styles.emptySubtitle}>This book does not have audio content.</Text>
+        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+          <Text style={styles.backButtonText}>Go Back</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
+
+  const activeSegment = bookSegments[currentSegmentIndex] || null;
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" />
+
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()}>
+          <Ionicons name="arrow-back" size={24} color={COLORS.white} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle} numberOfLines={1}>Audio Player</Text>
+        <View style={{ width: 24 }} />
+      </View>
+
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        {/* Book Cover */}
+        <View style={styles.coverContainer}>
+          {book.cover_url ? (
+            <Image source={{ uri: book.cover_url }} style={styles.coverImage} />
+          ) : (
+            <View style={styles.coverPlaceholder}>
+              <View style={styles.coverGradient} />
+              <Ionicons name="musical-notes" size={64} color={COLORS.white} />
+            </View>
+          )}
+        </View>
+
+        {/* Book Info */}
+        <View style={styles.infoSection}>
+          <Text style={styles.title} numberOfLines={2}>{book.title}</Text>
+          <Text style={styles.author} numberOfLines={1}>{book.author}</Text>
+
+          {activeSegment && (
+            <View style={styles.segmentInfo}>
+              <Text style={styles.segmentLabel}>Chapter {currentSegmentIndex + 1} of {bookSegments.length}</Text>
+              <Text style={styles.segmentText} numberOfLines={2}>
+                {activeSegment.text.substring(0, 100)}
+                {activeSegment.text.length > 100 ? '...' : ''}
+              </Text>
+            </View>
+          )}
+        </View>
+
+        {/* Progress */}
+        <View style={styles.progressSection}>
+          <Slider
+            style={styles.slider}
+            value={globalTime}
+            minimumValue={0}
+            maximumValue={displayDuration || 1}
+            minimumTrackTintColor={COLORS.gold}
+            maximumTrackTintColor={COLORS.gray600}
+            thumbTintColor={COLORS.gold}
+            onValueChange={handleSeek}
+          />
+          <View style={styles.timeRow}>
+            <Text style={styles.timeText}>{formatTime(globalTime)}</Text>
+            <Text style={styles.timeText}>{formatTime(displayDuration)}</Text>
+          </View>
+        </View>
+
+        {/* Playback Controls */}
+        <View style={styles.controlsSection}>
+          <View style={styles.controlsRow}>
+            <TouchableOpacity onPress={handleShuffle} style={[styles.utilityButton, isShuffled && styles.utilityButtonActive]}>
+              <Ionicons name="shuffle-outline" size={24} color={isShuffled ? COLORS.gold : COLORS.white} />
+            </TouchableOpacity>
+
+            <TouchableOpacity onPress={handleSkipBackward}>
+              <Ionicons name="play-skip-back" size={32} color={COLORS.white} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.playButton}
+              onPress={handlePlayPause}
+              disabled={bookSegments.length === 0}
+            >
+              <Ionicons
+                name={isPlaying ? 'pause-circle' : 'play-circle'}
+                size={64}
+                color={bookSegments.length === 0 ? COLORS.gray500 : COLORS.white}
+              />
+            </TouchableOpacity>
+
+            <TouchableOpacity onPress={handleSkipForward}>
+              <Ionicons name="play-skip-forward" size={32} color={COLORS.white} />
+            </TouchableOpacity>
+
+            <TouchableOpacity onPress={handleRepeat} style={[styles.utilityButton, (repeatMode !== 'none') && styles.utilityButtonActive]}>
+              {repeatMode === 'one' ? (
+                <View style={styles.repeatOneContainer}>
+                  <Ionicons name="repeat" size={24} color={COLORS.gold} />
+                  <Text style={styles.repeatOneText}>1</Text>
+                </View>
+              ) : (
+                <Ionicons name="repeat-outline" size={24} color={repeatMode === 'all' ? COLORS.gold : COLORS.white} />
+              )}
+            </TouchableOpacity>
+          </View>
+
+          {/* Secondary Controls Row */}
+          <View style={styles.secondaryControlsRow}>
+            <TouchableOpacity onPress={handleSpeedChange} style={styles.speedButton}>
+              <Text style={styles.speedText}>{audioSettings.playbackSpeed}x</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.sleepButton}>
+              <Ionicons name="time-outline" size={24} color={COLORS.white} />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Buffer Status */}
+        {isBuffering && (
+          <View style={styles.bufferContainer}>
+            <ActivityIndicator size="small" color={COLORS.gold} />
+            <Text style={styles.bufferText}>Buffering...</Text>
+          </View>
+        )}
+
+        {/* Chapter List */}
+        {bookSegments.length > 0 && (
+          <View style={styles.chaptersSection}>
+            <Text style={styles.sectionTitle}>Chapters</Text>
+            {bookSegments.map((segment, index) => (
+              <TouchableOpacity
+                key={segment.id}
+                style={[
+                  styles.chapterItem,
+                  index === currentSegmentIndex && styles.chapterItemActive,
+                ]}
+                onPress={() => {
+                  setCurrentSegmentIndex(index);
+                  // Seek to start of this segment
+                  seekTo(0);
+                }}
+              >
+                <View style={styles.chapterNumber}>
+                  <Text
+                    style={[
+                      styles.chapterNumberText,
+                      index === currentSegmentIndex && styles.chapterNumberTextActive,
+                    ]}
+                  >
+                    {index + 1}
+                  </Text>
+                </View>
+                <View style={styles.chapterInfo}>
+                  <Text
+                    style={[
+                      styles.chapterTitle,
+                      index === currentSegmentIndex && styles.chapterTitleActive,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {segment.text.substring(0, 60)}
+                    {segment.text.length > 60 ? '...' : ''}
+                  </Text>
+                  <Text style={styles.chapterDuration}>
+                    {formatTime(segment.start_time)} - {formatTime(segment.end_time)}
+                  </Text>
+                </View>
+                {index === currentSegmentIndex && isPlaying && (
+                  <Ionicons name="volume-high" size={16} color={COLORS.gold} />
+                )}
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+
+        {/* No Audio Message */}
+        {bookSegments.length === 0 && (
+          <View style={styles.noAudioContainer}>
+            <Ionicons name="volume-mute-outline" size={48} color={COLORS.gray400} />
+            <Text style={styles.noAudioTitle}>No Audio Segments</Text>
+            <Text style={styles.noAudioSubtitle}>
+              Audio content will be available when the administrator uploads audiobook files.
+            </Text>
+          </View>
+        )}
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: COLORS.deepNavy,
+  },
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: COLORS.deepNavy,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyContainer: {
+    flex: 1,
+    backgroundColor: COLORS.lightBackground,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: SPACING.xl,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: COLORS.gray600,
+    marginTop: SPACING.md,
+  },
+  emptySubtitle: {
+    fontSize: 14,
+    color: COLORS.gray400,
+    textAlign: 'center',
+    marginTop: SPACING.sm,
+  },
+  backButton: {
+    marginTop: SPACING.lg,
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.md,
+    backgroundColor: COLORS.royalPurple,
+    borderRadius: BORDER_RADIUS.md,
+  },
+  backButtonText: {
+    color: COLORS.white,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    gap: SPACING.md,
+  },
+  headerTitle: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.white,
+    textAlign: 'center',
+  },
+  scrollContent: {
+    padding: SPACING.md,
+  },
+  coverContainer: {
+    alignItems: 'center',
+    marginBottom: SPACING.lg,
+  },
+  coverImage: {
+    width: 200,
+    height: 200,
+    borderRadius: BORDER_RADIUS.lg,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  coverPlaceholder: {
+    width: 200,
+    height: 200,
+    borderRadius: BORDER_RADIUS.lg,
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  coverGradient: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: COLORS.royalPurple,
+  },
+  infoSection: {
+    alignItems: 'center',
+    marginBottom: SPACING.lg,
+  },
+  title: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: COLORS.white,
+    textAlign: 'center',
+    marginBottom: SPACING.xs,
+  },
+  author: {
+    fontSize: 15,
+    color: COLORS.gray400,
+    textAlign: 'center',
+  },
+  segmentInfo: {
+    marginTop: SPACING.md,
+    paddingHorizontal: SPACING.lg,
+  },
+  segmentLabel: {
+    fontSize: 11,
+    color: COLORS.gold,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  segmentText: {
+    fontSize: 13,
+    color: COLORS.gray300,
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  progressSection: {
+    marginBottom: SPACING.lg,
+  },
+  slider: {
+    width: '100%',
+    height: 40,
+  },
+  timeRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 4,
+  },
+  timeText: {
+    fontSize: 12,
+    color: COLORS.gray400,
+  },
+  controlsSection: {
+    marginBottom: SPACING.lg,
+  },
+  controlsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+  },
+  playButton: {
+    width: 72,
+    height: 72,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  speedButton: {
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 4,
+    borderRadius: BORDER_RADIUS.full,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+  },
+  speedText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.white,
+  },
+  sleepButton: {
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 4,
+  },
+  utilityButton: {
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 4,
+    borderRadius: BORDER_RADIUS.full,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  utilityButtonActive: {
+    backgroundColor: 'rgba(255, 201, 40, 0.15)',
+  },
+  repeatOneContainer: {
+    position: 'relative',
+    width: 24,
+    height: 24,
+  },
+  repeatOneText: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: COLORS.gold,
+  },
+  secondaryControlsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: SPACING.sm,
+    paddingHorizontal: SPACING.md,
+  },
+  bufferContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: SPACING.sm,
+    marginBottom: SPACING.lg,
+  },
+  bufferText: {
+    fontSize: 13,
+    color: COLORS.gray400,
+  },
+  chaptersSection: {
+    marginTop: SPACING.md,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.white,
+    marginBottom: SPACING.md,
+  },
+  chapterItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: SPACING.sm,
+    paddingHorizontal: SPACING.sm,
+    borderRadius: BORDER_RADIUS.md,
+    marginBottom: SPACING.xs,
+  },
+  chapterItemActive: {
+    backgroundColor: 'rgba(255, 201, 40, 0.1)',
+  },
+  chapterNumber: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: SPACING.sm,
+  },
+  chapterNumberText: {
+    fontSize: 13,
+    color: COLORS.gray400,
+    fontWeight: '500',
+  },
+  chapterNumberTextActive: {
+    color: COLORS.gold,
+  },
+  chapterInfo: {
+    flex: 1,
+  },
+  chapterTitle: {
+    fontSize: 14,
+    color: COLORS.gray300,
+  },
+  chapterTitleActive: {
+    color: COLORS.gold,
+    fontWeight: '500',
+  },
+  chapterDuration: {
+    fontSize: 11,
+    color: COLORS.gray500,
+    marginTop: 2,
+  },
+  noAudioContainer: {
+    alignItems: 'center',
+    paddingVertical: SPACING.xl,
+  },
+  noAudioTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.gray400,
+    marginTop: SPACING.md,
+  },
+  noAudioSubtitle: {
+    fontSize: 13,
+    color: COLORS.gray500,
+    textAlign: 'center',
+    marginTop: SPACING.sm,
+    paddingHorizontal: SPACING.lg,
+    lineHeight: 18,
+  },
+});

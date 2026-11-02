@@ -1,0 +1,48 @@
+# Environment variables — keep these private!
+.env
+
+# Node modules
+node_modules/
+
+# Expo
+.expo/
+dist/
+expo-*
+
+# Native build folders
+/android
+/ios
+.kotlin/
+
+# Gradle
+.gradle/
+*.apk
+*.aab
+*.ipa
+
+# Keystore files
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Temporary files
+*.log
+*.tmp
+
+# Large reference images
+*.png
+!assets/*.png

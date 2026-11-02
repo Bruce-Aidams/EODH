@@ -1,0 +1,48 @@
+{
+  "cli": {
+    "version": ">= 14.0.0"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk",
+        "image": "latest"
+      },
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": ".env",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": ".env"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk",
+        "image": "latest"
+      },
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": ".env",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": ".env"
+      }
+    },
+    "production": {
+      "android": {
+        "buildType": "app-bundle",
+        "image": "latest"
+      },
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": ".env",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": ".env"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "android": {
+        "serviceAccountKeyPath": "./google-play-service-account.json",
+        "track": "internal"
+      }
+    }
+  }
+}

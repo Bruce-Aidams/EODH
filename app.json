@@ -1,0 +1,69 @@
+{
+  "expo": {
+    "name": "EODH",
+    "slug": "eodh",
+    "version": "1.0.0",
+    "cli": {
+      "appVersionSource": "remote"
+    },
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "eodh",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.eodh.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#080B2E",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "package": "com.eodh.app",
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGesture": false,
+      "permissions": [
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+        "android.permission.WAKE_LOCK",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.INTERNET",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-font",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow EODH to access your microphone for audio features.",
+          "recordAudioAndroid": false
+        }
+      ],
+      "react-native-pdf-jsi",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#080B2E"
+        }
+      ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "3f8efb8a-ad58-48a1-84a5-d2bd7fb15e4a"
+      }
+    }
+  }
+}
