@@ -1,4 +1,5 @@
-import { Slot, Toast } from 'expo-router';
+import { Slot } from 'expo-router';
+import { Toast } from 'react-native-toast-message';
 import { useEffect } from 'react';
 import { useColorScheme } from 'react-native';
 import { useAuthStore } from '@/stores/authStore';
