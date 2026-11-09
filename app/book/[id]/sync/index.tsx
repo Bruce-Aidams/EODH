@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo, memo } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
+  FlatList,
   TouchableOpacity,
   StatusBar,
   ActivityIndicator,
@@ -30,6 +30,98 @@ import { ttsEngine } from '@/lib/tts/engine';
 import { useCompleteAudioPlayer } from '@/lib/audio/player';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+
+/**
+ * Memoized sentence item component to prevent re-rendering all sentences on every state change.
+ */
+interface SentenceItemProps {
+  sentence: string;
+  index: number;
+  isHighlighted: boolean;
+  useWordLevel: boolean;
+  highlightedWordMap: Map<string, string>;
+  themeColors: { text: string; highlight: string };
+  readingSettings: { fontSize: number; lineSpacing: number };
+  colors: any;
+  useTTS: boolean;
+  content: string;
+  onSentenceTap: (index: number) => void;
+}
+
+const SentenceItem = memo(function SentenceItem({
+  sentence,
+  index,
+  isHighlighted,
+  useWordLevel,
+  highlightedWordMap,
+  themeColors,
+  readingSettings,
+  colors,
+  useTTS,
+  content,
+  onSentenceTap,
+}: SentenceItemProps) {
+  const sentenceTrimmed = sentence.trim();
+
+  return (
+    <TouchableOpacity
+      onPress={() => onSentenceTap(index)}
+      activeOpacity={0.6}
+      hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+    >
+      {(!useWordLevel || !isHighlighted || !highlightedWordMap.has(sentenceTrimmed)) ? (
+        <Text
+          style={[
+            styles.sentence,
+            {
+              color: themeColors.text,
+              fontSize: readingSettings.fontSize,
+              lineHeight: readingSettings.fontSize * readingSettings.lineSpacing,
+              backgroundColor: isHighlighted ? themeColors.highlight : 'transparent',
+              borderRadius: 4,
+              paddingHorizontal: 2,
+            },
+          ]}
+        >
+          {sentence}{' '}
+        </Text>
+      ) : (
+        <Text
+          style={[
+            styles.sentence,
+            {
+              color: themeColors.text,
+              fontSize: readingSettings.fontSize,
+              lineHeight: readingSettings.fontSize * readingSettings.lineSpacing,
+              backgroundColor: themeColors.highlight,
+              borderRadius: 4,
+              paddingHorizontal: 2,
+            },
+          ]}
+        >
+          {sentence.split(/(\s+)/).map((word, wIndex) => {
+            const trimmedWord = word.trim();
+            if (!trimmedWord) return <Text key={`ws-${wIndex}`}>{word}</Text>;
+            const highlightedWord = highlightedWordMap.get(sentenceTrimmed)!;
+            const isCurrentWord = trimmedWord === highlightedWord;
+            return (
+              <Text
+                key={`w-${wIndex}`}
+                style={{
+                  color: isCurrentWord ? colors.primary : themeColors.text,
+                  fontWeight: isCurrentWord ? '700' : '400',
+                  fontSize: readingSettings.fontSize,
+                }}
+              >
+                {word}
+              </Text>
+            );
+          })}
+        </Text>
+      )}
+    </TouchableOpacity>
+  );
+});
 
 /**
  * Strip HTML tags from a string to get plain text
@@ -123,8 +215,8 @@ export default function SyncReaderScreen() {
     }
   }, [bookSegments, ttsEstimatedTimings]);
 
-  // Determine current segment index based on global time (audio mode)
-  const currentSegmentIndex = (() => {
+  // Determine current segment index based on global time (audio mode) - memoized to avoid O(n) loop on every render
+  const currentSegmentIndex = useMemo(() => {
     if (bookSegments.length === 0) return 0;
     for (let i = bookSegments.length - 1; i >= 0; i--) {
       if (globalTime >= bookSegments[i].start_time) {
@@ -132,7 +224,7 @@ export default function SyncReaderScreen() {
       }
     }
     return 0;
-  })();
+  }, [bookSegments, globalTime]);
 
   const currentSegment = bookSegments[currentSegmentIndex] || null;
   const currentAudioUri = resolvedAudioUris[currentSegmentIndex] || currentSegment?.audio_url || null;
@@ -230,13 +322,15 @@ export default function SyncReaderScreen() {
       const timings = SyncEngine.estimateTTSTimings(content, String(bookId), audioSettings.playbackSpeed);
       setTtsEstimatedTimings(timings);
       
+      // Pre-compute sentences for TTS callback (captured in closure)
+      const sentenceList = content.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 0);
+      
       // Set up TTS callbacks
       ttsEngine.setOnChunkBegin((utterance) => {
         const searchText = utterance.trim().substring(0, 50).toLowerCase();
-        const sentences = content.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 0);
         
-        for (let i = 0; i < sentences.length; i++) {
-          if (sentences[i].toLowerCase().includes(searchText)) {
+        for (let i = 0; i < sentenceList.length; i++) {
+          if (sentenceList[i].toLowerCase().includes(searchText)) {
             setTtsCurrentSentenceIndex(i);
             
             // Find the timing for this sentence
@@ -244,7 +338,7 @@ export default function SyncReaderScreen() {
             if (timing) {
               const position: SyncPosition = {
                 segmentId: `tts-${i}`,
-                text: sentences[i].trim(),
+                text: sentenceList[i].trim(),
                 pageNumber: null,
                 textOffsetStart: null,
                 textOffsetEnd: null,
@@ -281,39 +375,6 @@ export default function SyncReaderScreen() {
     }
   }, [content, useTTS, bookId]);
 
-
-  // Auto-scroll to keep highlighted text visible
-  useEffect(() => {
-    if (!currentSyncPosition) return;
-
-    const sentences = content.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 0);
-    const searchText = currentSyncPosition.text.trim().substring(0, 50).toLowerCase();
-    
-    for (let i = 0; i < sentences.length; i++) {
-      if (sentences[i].toLowerCase().includes(searchText)) {
-        if (autoScrollTimerRef.current) {
-          clearTimeout(autoScrollTimerRef.current);
-        }
-        autoScrollTimerRef.current = setTimeout(() => {
-          sentenceRefs.current[i]?.measureLayout(
-            scrollViewRef.current?.getNode() as any,
-            (x: number, y: number) => {
-              const scrollY = y - 100;
-              scrollViewRef.current?.scrollTo({ y: scrollY, animated: true });
-            },
-            () => {}
-          );
-        }, 200);
-        break;
-      }
-    }
-
-    return () => {
-      if (autoScrollTimerRef.current) {
-        clearTimeout(autoScrollTimerRef.current);
-      }
-    };
-  }, [currentSyncPosition, content]);
 
   // Fetch book data
   useEffect(() => {
@@ -420,6 +481,9 @@ export default function SyncReaderScreen() {
   // Determine if playing (audio or TTS)
   const isPlaying = useTTS ? ttsIsPlaying : audioIsPlaying;
 
+  // Split content into sentences for highlighting (memoized — placed before handlers that use it)
+  const sentences = useMemo(() => content.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 0), [content]);
+
   // Update current word when global time changes and word-level is enabled
   useEffect(() => {
     if (!useWordLevel || !isPlaying) {
@@ -460,12 +524,11 @@ export default function SyncReaderScreen() {
     }
   }, [isPlaying, useTTS, content, audioSettings.playbackSpeed, ttsCurrentSentenceIndex, startSync, stopSync, audioPlay, audioPause]);
 
-  const handleSeek = (value: number) => {
+  const handleSeek = useCallback((value: number) => {
     if (useTTS) {
       // For TTS, find the sentence at this time and seek to it
       const timing = ttsEstimatedTimings.find(t => value >= t.start_time && value < t.end_time);
       if (timing) {
-        const sentences = content.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 0);
         const index = ttsEstimatedTimings.indexOf(timing);
         setTtsCurrentSentenceIndex(index);
         ttsEngine.stop();
@@ -487,9 +550,9 @@ export default function SyncReaderScreen() {
         accumulatedTime += segDuration;
       }
     }
-  };
+  }, [useTTS, ttsEstimatedTimings, content, bookSegments]);
 
-  const handleSpeedChange = () => {
+  const handleSpeedChange = useCallback(() => {
     const speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
     const currentIndex = speeds.indexOf(audioSettings.playbackSpeed);
     const nextSpeed = speeds[(currentIndex + 1) % speeds.length];
@@ -497,16 +560,15 @@ export default function SyncReaderScreen() {
       ...s,
       audioSettings: { ...s.audioSettings, playbackSpeed: nextSpeed },
     }));
-    
+
     if (useTTS) {
       ttsEngine.configure({ rate: nextSpeed });
     } else {
       audioSetPlaybackRate(nextSpeed);
     }
-  };
+  }, [useTTS, audioSettings.playbackSpeed]);
 
-  const handleSkipForward = () => {
-    const sentences = content.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 0);
+  const handleSkipForward = useCallback(() => {
     if (useTTS) {
       const nextIndex = Math.min(ttsCurrentSentenceIndex + 1, sentences.length - 1);
       setTtsCurrentSentenceIndex(nextIndex);
@@ -517,9 +579,9 @@ export default function SyncReaderScreen() {
       const newTime = Math.min(globalTime + 10, totalDuration);
       handleSeek(newTime);
     }
-  };
+  }, [useTTS, ttsCurrentSentenceIndex, sentences.length, content, globalTime, totalDuration]);
 
-  const handleSkipBackward = () => {
+  const handleSkipBackward = useCallback(() => {
     if (useTTS) {
       const prevIndex = Math.max(ttsCurrentSentenceIndex - 1, 0);
       setTtsCurrentSentenceIndex(prevIndex);
@@ -530,7 +592,7 @@ export default function SyncReaderScreen() {
       const newTime = Math.max(globalTime - 10, 0);
       handleSeek(newTime);
     }
-  };
+  }, [useTTS, ttsCurrentSentenceIndex, content, globalTime]);
 
   // Lock-screen media controls
   useMediaControls({
@@ -571,6 +633,20 @@ export default function SyncReaderScreen() {
 
   const themeColors = useMemo(() => getThemeColors(), [readingSettings.theme, isDark]);
 
+  // Build a set of highlighted sentence indices (memoized to avoid per-render string search)
+  const highlightedSentenceIndices = useMemo(() => {
+    const indices = new Set<number>();
+    if (!currentSyncPosition || sentences.length === 0) return indices;
+    const searchText = currentSyncPosition.text.trim().substring(0, 50).toLowerCase();
+    if (!searchText) return indices;
+    for (let i = 0; i < sentences.length; i++) {
+      if (sentences[i].toLowerCase().includes(searchText)) {
+        indices.add(i);
+      }
+    }
+    return indices;
+  }, [currentSyncPosition, sentences]);
+
   if (loading) {
     return (
       <SafeAreaView style={[styles.loadingContainer, { backgroundColor: colors.background }]} edges={['left', 'right']}>
@@ -592,31 +668,41 @@ export default function SyncReaderScreen() {
     );
   }
 
-  // Split content into sentences for highlighting (memoized to avoid re-splitting on every render)
-  const sentences = useMemo(() => content.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 0), [content]);
-
-  // Build a set of highlighted sentence indices (memoized to avoid per-render string search)
-  const highlightedSentenceIndices = useMemo(() => {
-    const indices = new Set<number>();
-    if (!currentSyncPosition || sentences.length === 0) return indices;
-    const searchText = currentSyncPosition.text.trim().substring(0, 50).toLowerCase();
-    if (!searchText) return indices;
-    for (let i = 0; i < sentences.length; i++) {
-      if (sentences[i].toLowerCase().includes(searchText)) {
-        indices.add(i);
-      }
-    }
-    return indices;
-  }, [currentSyncPosition, sentences]);
-
   // Build a map of sentence text to current word for word-level highlighting
   const highlightedWordMap = useMemo(() => {
     if (!useWordLevel || !currentWord || !currentSyncPosition) return new Map<string, string>();
     return new Map([[currentSyncPosition.text.trim(), currentWord.word]]);
   }, [useWordLevel, currentWord, currentSyncPosition]);
 
-  // Determine if content is available
-  const hasContent = sentences.length > 0 && !content.startsWith('No content available');
+  // Determine if content is available (memoized)
+  const hasContent = useMemo(() => sentences.length > 0 && !content.startsWith('No content available'), [sentences.length, content]);
+
+  // Auto-scroll to keep highlighted text visible - uses memoized indices and FlatList scrollToIndex
+  useEffect(() => {
+    if (!currentSyncPosition) return;
+
+    // Use the already-computed highlighted indices instead of re-splitting and searching
+    const indicesToCheck = Array.from(highlightedSentenceIndices);
+    if (indicesToCheck.length === 0) return;
+
+    const index = indicesToCheck[0];
+    if (autoScrollTimerRef.current) {
+      clearTimeout(autoScrollTimerRef.current);
+    }
+    autoScrollTimerRef.current = setTimeout(() => {
+      scrollViewRef.current?.scrollToIndex({
+        index,
+        animated: true,
+        viewPosition: 0.3,
+      });
+    }, 200);
+
+    return () => {
+      if (autoScrollTimerRef.current) {
+        clearTimeout(autoScrollTimerRef.current);
+      }
+    };
+  }, [currentSyncPosition, highlightedSentenceIndices]);
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['left', 'right']}>
@@ -658,109 +744,45 @@ export default function SyncReaderScreen() {
 
       {/* Content Area */}
       <AnimatedView style={{ flex: 1 }} fadeDelay={200} fadeDuration={400} slideDirection="up" slideDistance={15}>
-        <TouchableOpacity
-          style={styles.contentArea}
-          onPress={() => setShowControls(!showControls)}
-          activeOpacity={1}
-        >
-        <ScrollView
-          ref={scrollViewRef}
-          style={styles.scrollView}
+        <View style={styles.contentArea}>
+        <FlatList
+          ref={scrollViewRef as any}
+          data={sentences}
+          keyExtractor={(_, index) => String(index)}
+          initialNumToRender={20}
+          maxToRenderPerBatch={15}
+          windowSize={5}
+          removeClippedSubviews
           contentContainerStyle={[
             styles.scrollContent,
             { paddingHorizontal: readingSettings.margins, paddingBottom: insets.bottom + SPACING.xxl + 20 },
           ]}
           showsVerticalScrollIndicator={false}
-        >
-          {sentences.map((sentence, index) => {
-            const isHighlighted = highlightedSentenceIndices.has(index);
-            const sentenceTrimmed = sentence.trim();
-            
-            // For word-level highlighting, split the sentence into words
-            const renderSentenceContent = () => {
-              if (!useWordLevel || !isHighlighted || !highlightedWordMap.has(sentenceTrimmed)) {
-                return (
-                  <Text
-                    style={[
-                      styles.sentence,
-                      {
-                        color: themeColors.text,
-                        fontSize: readingSettings.fontSize,
-                        lineHeight: readingSettings.fontSize * readingSettings.lineSpacing,
-                        backgroundColor: isHighlighted ? themeColors.highlight : 'transparent',
-                        borderRadius: 4,
-                        paddingHorizontal: 2,
-                      },
-                    ]}
-                  >
-                    {sentence}{' '}
-                  </Text>
-                );
-              }
-
-              // Word-level highlighting
-              const highlightedWord = highlightedWordMap.get(sentenceTrimmed)!;
-              const words = sentence.split(/(\s+)/);
-              
-              return (
-                <Text
-                  style={[
-                    styles.sentence,
-                    {
-                      color: themeColors.text,
-                      fontSize: readingSettings.fontSize,
-                      lineHeight: readingSettings.fontSize * readingSettings.lineSpacing,
-                      backgroundColor: themeColors.highlight,
-                      borderRadius: 4,
-                      paddingHorizontal: 2,
-                    },
-                  ]}
-                >
-                  {words.map((word, wIndex) => {
-                    const trimmedWord = word.trim();
-                    if (!trimmedWord) return <Text key={`ws-${wIndex}`}>{word}</Text>;
-                    
-                    const isCurrentWord = trimmedWord === highlightedWord;
-                    return (
-                      <Text
-                        key={`w-${wIndex}`}
-                        style={{
-                          color: isCurrentWord ? colors.primary : themeColors.text,
-                          fontWeight: isCurrentWord ? '700' : '400',
-                          fontSize: readingSettings.fontSize,
-                        }}
-                      >
-                        {word}
-                      </Text>
-                    );
-                  })}
-                </Text>
-              );
-            };
-            
-            return (
-              <TouchableOpacity
-                key={index}
-                ref={(ref) => {
-                  sentenceRefs.current[index] = ref;
-                }}
-                onPress={() => {
-                  if (useTTS) {
-                    // Tap to start TTS from this sentence
-                    setTtsCurrentSentenceIndex(index);
-                    ttsEngine.stop();
-                    ttsEngine.loadText(content);
-                    ttsEngine.speak(index);
-                    setTtsIsPlaying(true);
-                  }
-                }}
-              >
-                {renderSentenceContent()}
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-        </TouchableOpacity>
+          renderItem={({ item: sentence, index }) => (
+            <SentenceItem
+              sentence={sentence}
+              index={index}
+              isHighlighted={highlightedSentenceIndices.has(index)}
+              useWordLevel={useWordLevel}
+              highlightedWordMap={highlightedWordMap}
+              themeColors={themeColors}
+              readingSettings={readingSettings}
+              colors={colors}
+              useTTS={useTTS}
+              content={content}
+              onSentenceTap={(idx) => {
+                if (useTTS) {
+                  setTtsCurrentSentenceIndex(idx);
+                  ttsEngine.stop();
+                  ttsEngine.loadText(content);
+                  ttsEngine.speak(idx);
+                  setTtsIsPlaying(true);
+                }
+              }}
+            />
+          )}
+        />
+        </View>
       </AnimatedView>
 
       {/* Bottom Controls */}
