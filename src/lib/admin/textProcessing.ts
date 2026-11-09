@@ -7,14 +7,16 @@ import { extractChapters, markdownToPlainText } from '@/lib/markdown/renderer';
  * Admin Text Processing Pipeline for EODH
  * 
  * Processes uploaded documents to:
- * 1. Extract text content
- * 2. Detect chapters and headings
+ * 1. Extract text content via unified Edge Function
+ * 2. Create chapters with HTML content
  * 3. Generate document structure
  * 4. Prepare text for TTS
  * 5. Generate synchronization metadata
  * 6. Identify scanned PDFs requiring OCR
  * 
  * This runs on the admin side after document upload.
+ * All formats (PDF, EPUB, DOCX, Markdown) are processed through the
+ * unified process-document Edge Function for consistent output.
  */
 
 export interface ProcessingResult {
@@ -35,11 +37,54 @@ export interface ProcessingProgress {
   message: string;
 }
 
+interface EdgeFunctionChapter {
+  title: string;
+  order_index: number;
+  content: string;
+  page_start?: number;
+  page_end?: number;
+}
+
+interface EdgeFunctionResponse {
+  chapters: EdgeFunctionChapter[];
+  fullText: string;
+  totalPages: number;
+  totalChapters: number;
+  isScanned?: boolean;
+  needsOcr?: boolean;
+  error?: string;
+}
+
+/**
+ * Call the unified process-document Edge Function.
+ */
+async function callProcessDocument(documentUrl: string): Promise<EdgeFunctionResponse> {
+  const supabaseUrl = (globalThis as any).__supabaseUrl || process.env.EXPO_PUBLIC_SUPABASE_URL || '';
+  const supabaseKey = (globalThis as any).__supabaseKey || process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
+
+  const response = await fetch(`${supabaseUrl}/functions/v1/process-document`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${supabaseKey}`,
+    },
+    body: JSON.stringify({ documentUrl }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || `Edge function returned ${response.status}`);
+  }
+
+  return response.json();
+}
+
 /**
  * Process a newly uploaded document.
  * 
- * For Markdown files, text extraction is done client-side.
- * For PDF files, text extraction requires a Supabase Edge Function.
+ * All formats (PDF, EPUB, DOCX, Markdown) are routed through the unified
+ * process-document Edge Function for consistent chapter extraction and
+ * HTML content generation.
  */
 export async function processDocument(
   book: Book,
@@ -59,45 +104,40 @@ export async function processDocument(
 
   try {
     let fullText = '';
+    let edgeChapters: EdgeFunctionChapter[] = [];
+    let totalPages = 0;
 
-    // Stage 1: Extract text
+    // Stage 1: Extract text via Edge Function
     onProgress?.({
       stage: 'extracting',
       progress: 10,
-      message: 'Extracting text from document...',
+      message: `Extracting text from ${book.document_type} document...`,
     });
 
-    if (book.document_type === 'markdown') {
-      // For Markdown, fetch and process directly
-      const response = await fetch(book.document_url!);
-      if (!response.ok) throw new Error(`Failed to fetch document: ${response.status}`);
-      
-      const rawText = await response.text();
-      fullText = markdownToPlainText(rawText);
-    } else {
-      // For PDF, use the Edge Function
-      try {
-        const supabaseUrl = (globalThis as any).__supabaseUrl || process.env.EXPO_PUBLIC_SUPABASE_URL || '';
-        const supabaseKey = (globalThis as any).__supabaseKey || process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
-        
-        const extractResponse = await fetch(`${supabaseUrl}/functions/v1/extract-pdf-text`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${supabaseKey}`,
-          },
-          body: JSON.stringify({ documentUrl: book.document_url }),
-        });
-
-        if (extractResponse.ok) {
-          const extractData = await extractResponse.json();
-          fullText = extractData.fullText || '';
-          result.isScanned = extractData.isScanned || false;
-          result.needsOcr = extractData.needsOcr || false;
-        } else {
-          // Edge function not available — mark as needing OCR
-          result.needsOcr = true;
-          result.error = 'PDF text extraction requires server-side processing. Please configure the extract-pdf-text Edge Function.';
+    try {
+      const edgeResponse = await callProcessDocument(book.document_url!);
+      fullText = edgeResponse.fullText || '';
+      edgeChapters = edgeResponse.chapters || [];
+      totalPages = edgeResponse.totalPages || 0;
+      result.isScanned = edgeResponse.isScanned || false;
+      result.needsOcr = edgeResponse.needsOcr || false;
+    } catch (err: any) {
+      // Fallback: for Markdown, try client-side processing
+      if (book.document_type === 'markdown') {
+        try {
+          const response = await fetch(book.document_url!);
+          if (response.ok) {
+            const rawText = await response.text();
+            fullText = markdownToPlainText(rawText);
+            const fallbackChapters = extractChapters(fullText);
+            edgeChapters = fallbackChapters.map((c, i) => ({
+              title: c.title,
+              order_index: i,
+              content: `<p>${c.content}</p>`,
+            }));
+          }
+        } catch (fallbackErr: any) {
+          result.error = `Text extraction failed: ${fallbackErr?.message || 'Unknown error'}`;
           onProgress?.({
             stage: 'error',
             progress: 0,
@@ -105,9 +145,8 @@ export async function processDocument(
           });
           return result;
         }
-      } catch (err: any) {
-        result.needsOcr = true;
-        result.error = `PDF extraction failed: ${err?.message || 'Unknown error'}`;
+      } else {
+        result.error = `Text extraction failed: ${err?.message || 'Unknown error'}`;
         onProgress?.({
           stage: 'error',
           progress: 0,
@@ -130,46 +169,67 @@ export async function processDocument(
       return result;
     }
 
-    // Stage 2: Detect and create chapters
+    // Stage 2: Create chapters with content (batch insert)
     onProgress?.({
       stage: 'chapters',
       progress: 30,
-      message: 'Detecting chapters and headings...',
+      message: `Creating ${edgeChapters.length} chapters...`,
     });
 
-    const chapters = extractChapters(fullText);
+    const chapterInserts = edgeChapters.map((edgeChapter) => ({
+      book_id: book.id,
+      title: edgeChapter.title,
+      order_index: edgeChapter.order_index,
+      content: edgeChapter.content || null,
+      page_start: edgeChapter.page_start || null,
+      page_end: edgeChapter.page_end || null,
+    }));
+
+    const { data: createdChaptersData, error: chaptersError } = await supabase
+      .from('book_chapters')
+      .insert(chapterInserts)
+      .select();
+
     let chaptersCreated = 0;
+    let createdChapters: BookChapter[] = [];
 
-    for (const chapter of chapters) {
-      const { error } = await supabase
-        .from('book_chapters')
-        .insert({
-          book_id: book.id,
-          title: chapter.title,
-          order_index: chapter.order,
-        });
-
-      if (!error) {
-        chaptersCreated++;
-      }
+    if (!chaptersError && createdChaptersData) {
+      chaptersCreated = createdChaptersData.length;
+      createdChapters = createdChaptersData;
     }
 
     // If no chapters detected, create a single chapter
     if (chaptersCreated === 0) {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('book_chapters')
         .insert({
           book_id: book.id,
-          title: 'Full Text',
+          title: 'Full Document',
           order_index: 0,
-        });
+          content: `<p>${fullText}</p>`,
+        })
+        .select();
 
-      if (!error) chaptersCreated = 1;
+      if (!error && data) {
+        chaptersCreated = 1;
+        createdChapters.push(...data);
+      }
     }
 
     result.chaptersCreated = chaptersCreated;
 
-    // Stage 3: Generate segments for TTS
+    // Update book metadata
+    await supabase
+      .from('books')
+      .update({
+        processing_status: 'completed',
+        total_chapters: chaptersCreated,
+        total_pages: totalPages || null,
+        content_format: book.document_type === 'pdf' ? 'reflow' : 'reflow',
+      })
+      .eq('id', book.id);
+
+    // Stage 3: Generate segments for TTS (batch insert)
     onProgress?.({
       stage: 'segments',
       progress: 60,
@@ -177,90 +237,92 @@ export async function processDocument(
     });
 
     const sentences = splitIntoSentences(fullText);
-    let segmentsCreated = 0;
     let currentTime = 0;
     const speechRate = 1.0;
 
-    // Fetch chapters for association
-    const { data: chaptersData } = await supabase
-      .from('book_chapters')
-      .select('*')
-      .eq('book_id', book.id)
-      .order('order_index', { ascending: true });
+    const chapterList = createdChapters.sort((a, b) => a.order_index - b.order_index);
 
-    const chapterList = chaptersData || [];
-    let currentChapterIndex = 0;
-
-    for (let i = 0; i < sentences.length; i++) {
-      const sentence = sentences[i];
+    // Build all segments first
+    const segmentInserts = sentences.map((sentence, i) => {
       const estimatedDuration = estimateTTSDuration(sentence, speechRate);
       const startTime = currentTime;
       const endTime = currentTime + estimatedDuration;
+      currentTime = endTime;
 
       // Determine which chapter this sentence belongs to
-      const chapter = chapterList[currentChapterIndex] || null;
-
-      const { error } = await supabase
-        .from('audio_segments')
-        .insert({
-          book_id: book.id,
-          chapter_id: chapter?.id || null,
-          text: sentence,
-          audio_url: null,
-          start_time: startTime,
-          end_time: endTime,
-          page_number: null,
-          order_index: i,
-        });
-
-      if (!error) {
-        segmentsCreated++;
+      let currentChapter = chapterList[0] || null;
+      for (const ch of chapterList) {
+        if (fullText.indexOf(ch.title) !== -1) {
+          currentChapter = ch;
+        }
       }
 
-      currentTime = endTime;
+      return {
+        book_id: book.id,
+        chapter_id: currentChapter?.id || null,
+        text: sentence,
+        audio_url: null,
+        start_time: startTime,
+        end_time: endTime,
+        page_number: null,
+        order_index: i,
+      };
+    });
+
+    // Batch insert segments in chunks of 100 to avoid payload size limits
+    const chunkSize = 100;
+    let segmentsCreated = 0;
+    for (let i = 0; i < segmentInserts.length; i += chunkSize) {
+      const chunk = segmentInserts.slice(i, i + chunkSize) as any[];
+      const { error } = await supabase.from('audio_segments').insert(chunk);
+      if (!error) {
+        segmentsCreated += chunk.length;
+      }
     }
 
     result.segmentsCreated = segmentsCreated;
 
-    // Stage 4: Generate alignments
+    // Stage 4: Generate alignments (batch insert)
     onProgress?.({
       stage: 'alignments',
       progress: 85,
       message: 'Generating synchronization alignments...',
     });
 
-    let alignmentsCreated = 0;
     currentTime = 0;
 
-    for (let i = 0; i < sentences.length; i++) {
-      const sentence = sentences[i];
+    // Build all alignments first
+    const alignmentInserts = sentences.map((sentence) => {
       const estimatedDuration = estimateTTSDuration(sentence, speechRate);
       const startTime = currentTime;
       const endTime = currentTime + estimatedDuration;
+      currentTime = endTime;
 
       // Find text offset in full text
       const textOffsetStart = fullText.indexOf(sentence);
       const textOffsetEnd = textOffsetStart >= 0 ? textOffsetStart + sentence.length : null;
 
-      const { error } = await supabase
-        .from('audio_alignments')
-        .insert({
-          book_id: book.id,
-          segment_id: `seg-${book.id}-${i}`,
-          chapter_id: null,
-          text: sentence,
-          start_time: startTime,
-          end_time: endTime,
-          page_number: null,
-          text_offset_start: textOffsetStart >= 0 ? textOffsetStart : null,
-          text_offset_end: textOffsetEnd,
-        });
+      return {
+        book_id: book.id,
+        segment_id: null,
+        chapter_id: null,
+        text: sentence,
+        start_time: startTime,
+        end_time: endTime,
+        page_number: null,
+        text_offset_start: textOffsetStart >= 0 ? textOffsetStart : null,
+        text_offset_end: textOffsetEnd,
+      };
+    });
 
+    // Batch insert alignments in chunks of 100
+    let alignmentsCreated = 0;
+    for (let i = 0; i < alignmentInserts.length; i += chunkSize) {
+      const chunk = alignmentInserts.slice(i, i + chunkSize) as any[];
+      const { error } = await supabase.from('audio_alignments').insert(chunk);
       if (!error) {
-        alignmentsCreated++;
+        alignmentsCreated += chunk.length;
       }
-
-      currentTime = endTime;
     }
 
     result.alignmentsCreated = alignmentsCreated;

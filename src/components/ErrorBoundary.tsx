@@ -1,6 +1,11 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { COLORS, SPACING, BORDER_RADIUS, FONT_SIZE } from '@/constants/theme';
+
+// Use inline defaults to avoid module-level import issues in production R8 bundles
+const C = { deepNavy: '#080B2E', royalPurple: '#5415E8', white: '#FFFFFF', lightBackground: '#F6F5FC' };
+const S = { xs: 4, sm: 8, md: 16, lg: 24, xl: 32, xxl: 48 };
+const R = { sm: 8, md: 12, lg: 16, xl: 24, full: 9999 };
+const FS = { xs: 10, sm: 12, md: 14, lg: 16, xl: 20, xxl: 24, xxxl: 32 };
 
 /**
  * Error Boundary Component for EODH
@@ -117,42 +122,42 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: SPACING.xl,
-    backgroundColor: COLORS.lightBackground,
+    padding: S.xl,
+    backgroundColor: C.lightBackground,
   },
   icon: {
     fontSize: 48,
-    marginBottom: SPACING.md,
+    marginBottom: S.md,
   },
   title: {
-    fontSize: FONT_SIZE.xl,
+    fontSize: FS.xl,
     fontWeight: '700',
-    color: COLORS.deepNavy,
-    marginBottom: SPACING.sm,
+    color: C.deepNavy,
+    marginBottom: S.sm,
   },
   message: {
-    fontSize: FONT_SIZE.md,
-    color: COLORS.deepNavy,
+    fontSize: FS.md,
+    color: C.deepNavy,
     textAlign: 'center',
-    marginBottom: SPACING.md,
+    marginBottom: S.md,
   },
   errorDetails: {
-    fontSize: FONT_SIZE.sm,
-    color: COLORS.deepNavy,
+    fontSize: FS.sm,
+    color: C.deepNavy,
     opacity: 0.6,
     fontFamily: 'monospace',
-    marginBottom: SPACING.md,
+    marginBottom: S.md,
     textAlign: 'center',
   },
   button: {
-    backgroundColor: COLORS.royalPurple,
-    paddingHorizontal: SPACING.xl,
-    paddingVertical: SPACING.md,
-    borderRadius: BORDER_RADIUS.md,
+    backgroundColor: C.royalPurple,
+    paddingHorizontal: S.xl,
+    paddingVertical: S.md,
+    borderRadius: R.md,
   },
   buttonText: {
-    color: COLORS.white,
-    fontSize: FONT_SIZE.md,
+    color: C.white,
+    fontSize: FS.md,
     fontWeight: '600',
   },
 });

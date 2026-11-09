@@ -3,14 +3,10 @@
     "name": "EODH",
     "slug": "eodh",
     "version": "1.0.0",
-    "cli": {
-      "appVersionSource": "remote"
-    },
-    "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "eodh",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
+    "orientation": "portrait",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.eodh.app"
@@ -55,7 +51,11 @@
           "resizeMode": "contain",
           "backgroundColor": "#080B2E"
         }
-      ]
+      ],
+      "expo-notifications",
+      "expo-media-library",
+      "expo-image-picker",
+      "expo-dev-client"
     ],
     "extra": {
       "router": {},

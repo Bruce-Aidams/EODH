@@ -1,113 +1,242 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   FlatList,
   TouchableOpacity,
-  TextInput,
-  SafeAreaView,
   StatusBar,
   ActivityIndicator,
+  ScrollView,
 } from 'react-native';
-import { useRouter } from 'expo-router';
-import { useLibraryStore } from '@/stores/libraryStore';
-import { COLORS, SPACING, BORDER_RADIUS } from '@/constants/theme';
+import { useRouter, useFocusEffect } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useLibraryStore } from '@/stores/libraryStore';
+import { supabase } from '@/lib/supabase/client';
+import { SPACING, BORDER_RADIUS, COLORS, FONT_SIZE, GRADIENTS, SHADOWS, toGradientCSS } from '@/constants/theme';
+import { useResponsiveDimensions } from '@/lib/responsive/useResponsiveDimensions';
 import { Book } from '@/types';
 import LazyImage from '@/components/LazyImage';
+import FilterChip from '@/components/FilterChip';
+import SearchBar from '@/components/SearchBar';
+import { useTheme } from '@/lib/theme/ThemeContext';
+import { AnimatedView } from '@/components/AnimatedView';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function LibraryScreen() {
   const router = useRouter();
   const { books, isLoading, searchQuery, sortBy, fetchBooks, setSearchQuery, setSortBy } = useLibraryStore();
+  const { colors, isDark } = useTheme();
+  const dimensions = useResponsiveDimensions();
+  const insets = useSafeAreaInsets();
   const [localSearch, setLocalSearch] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string>('');
+  const [selectedType, setSelectedType] = useState<'all' | 'pdf' | 'markdown' | 'audio'>('all');
+  const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
 
+
+  // Load categories once on mount
   useEffect(() => {
-    fetchBooks();
+    loadCategories();
   }, []);
 
-  const filteredBooks = books.filter(book =>
-    book.title.toLowerCase().includes(localSearch.toLowerCase()) ||
-    book.author.toLowerCase().includes(localSearch.toLowerCase())
+  // Refetch books whenever the screen gains focus (e.g., after uploading a book)
+  useFocusEffect(
+    useCallback(() => {
+      fetchBooks();
+    }, [fetchBooks])
   );
 
-  const renderBook = ({ item }: { item: Book }) => (
-    <TouchableOpacity
-      style={styles.bookItem}
-      onPress={() => router.push(`/book/${item.id}`)}
-    >
-      <View style={styles.bookCover}>
-        <LazyImage
-          uri={item.cover_url || undefined}
-          width={56}
-          height={76}
-          borderRadius={BORDER_RADIUS.sm}
-        />
-        {item.has_audio && (
-          <View style={styles.audioBadge}>
-            <Ionicons name="headset" size={10} color={COLORS.white} />
-          </View>
-        )}
-      </View>
-      <View style={styles.bookInfo}>
-        <Text style={styles.bookTitle} numberOfLines={2}>{item.title}</Text>
-        <Text style={styles.bookAuthor}>{item.author}</Text>
-        <View style={styles.bookMeta}>
-          <View style={styles.metaBadge}>
-            <Ionicons name={item.document_type === 'pdf' ? 'document-text' : 'code-slash'} size={10} color={COLORS.gray500} />
-            <Text style={styles.metaText}>{item.document_type.toUpperCase()}</Text>
+  const loadCategories = async () => {
+    try {
+      const { data } = await supabase
+        .from('book_categories')
+        .select('id, name')
+        .order('name');
+      setCategories(data || []);
+    } catch (error) {
+      console.error('Failed to load categories:', error);
+    }
+  };
+
+  const filteredBooks = useMemo(() => {
+    let result = books.filter(book =>
+      book.title.toLowerCase().includes(localSearch.toLowerCase()) ||
+      book.author.toLowerCase().includes(localSearch.toLowerCase())
+    );
+
+    if (selectedCategory) {
+      result = result.filter(book => book.category_id === selectedCategory);
+    }
+
+    if (selectedType === 'pdf') {
+      result = result.filter(book => book.document_type === 'pdf');
+    } else if (selectedType === 'markdown') {
+      result = result.filter(book => book.document_type === 'markdown');
+    } else if (selectedType === 'audio') {
+      result = result.filter(book => book.has_audio);
+    }
+
+    return result;
+  }, [books, localSearch, selectedCategory, selectedType]);
+
+  const clearFilters = () => {
+    setLocalSearch('');
+    setSelectedCategory('');
+    setSelectedType('all');
+  };
+
+  const hasFilters = localSearch || selectedCategory || selectedType !== 'all';
+
+  const renderBook = ({ item, index }: { item: Book; index: number }) => {
+    return (
+      <AnimatedView
+        fadeDelay={300 + index * 60}
+        fadeDuration={350}
+        slideDirection="up"
+        slideDistance={20}
+        onPress={() => router.push(`/book/${item.id}`)}
+        pressScale={0.97}
+        style={[styles.bookItem, { backgroundColor: colors.card }]}
+      >
+        <View style={[styles.bookCover, { width: dimensions.listCoverWidth, height: dimensions.listCoverHeight }]}>
+          <LazyImage
+            uri={item.cover_url || undefined}
+            width={dimensions.listCoverWidth}
+            height={dimensions.listCoverHeight}
+            borderRadius={BORDER_RADIUS.md}
+          />
+          {item.has_audio && (
+            <View style={styles.audioBadge}>
+              <Ionicons name="headset" size={10} color={COLORS.white} />
+            </View>
+          )}
+        </View>
+        <View style={styles.bookInfo}>
+          <Text style={[styles.bookTitle, { color: colors.text }]} numberOfLines={2}>{item.title}</Text>
+          <Text style={[styles.bookAuthor, { color: colors.textSecondary }]}>{item.author}</Text>
+          <View style={styles.bookMeta}>
+            <View style={[styles.metaBadge, { backgroundColor: colors.surfaceVariant }]}>
+              <Ionicons
+                name={item.document_type === 'pdf' ? 'document-text' : 'code-slash'}
+                size={10}
+                color={colors.textSecondary}
+              />
+              <Text style={[styles.metaText, { color: colors.textSecondary }]}>
+                {item.document_type.toUpperCase()}
+              </Text>
+            </View>
           </View>
         </View>
-      </View>
-    </TouchableOpacity>
-  );
+        <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+      </AnimatedView>
+    );
+  };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" />
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Library</Text>
-      </View>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['left', 'right']}>
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
 
-      <View style={styles.searchContainer}>
-        <Ionicons name="search" size={20} color={COLORS.gray400} style={styles.searchIcon} />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search books..."
-          placeholderTextColor={COLORS.gray400}
-          value={localSearch}
-          onChangeText={(text) => {
-            setLocalSearch(text);
-            setSearchQuery(text);
-          }}
-        />
-        {localSearch.length > 0 && (
-          <TouchableOpacity onPress={() => setLocalSearch('')}>
-            <Ionicons name="close-circle" size={20} color={COLORS.gray400} />
+      {/* Gradient Header */}
+      <AnimatedView fadeDelay={50} fadeDuration={400} slideDirection="down" slideDistance={20}>
+        <View style={[styles.gradientHeader, { backgroundImage: toGradientCSS(isDark ? GRADIENTS.dark : GRADIENTS.primary, 'diagonal'), paddingTop: insets.top + SPACING.md }]}>
+          <View style={styles.headerRow}>
+            <Text style={styles.headerTitle}>My Library</Text>
+            <TouchableOpacity
+              style={styles.globalSearchButton}
+              onPress={() => router.push('/search')}
+              accessibilityLabel="Search all books"
+            >
+              <Ionicons name="search" size={22} color="#FFFFFF" />
+            </TouchableOpacity>
+          </View>
+          <SearchBar
+            value={localSearch}
+            onChangeText={(text) => {
+              setLocalSearch(text);
+              setSearchQuery(text);
+            }}
+            placeholder="Search books..."
+            onClear={() => setLocalSearch('')}
+          />
+        </View>
+      </AnimatedView>
+
+      {/* Combined Filters Row */}
+      <AnimatedView fadeDelay={150} fadeDuration={400} slideDirection="up" slideDistance={15}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterContainer}>
+        {[
+          { key: 'all' as const, label: 'All', icon: 'library-outline' as const },
+          { key: 'pdf' as const, label: 'PDFs', icon: 'document-text-outline' as const },
+          { key: 'markdown' as const, label: 'MD', icon: 'code-slash-outline' as const },
+          { key: 'audio' as const, label: 'Audiobooks', icon: 'headset-outline' as const },
+        ].map((type) => (
+          <FilterChip
+            key={type.key}
+            label={type.label}
+            icon={type.icon}
+            selected={selectedType === type.key}
+            onPress={() => setSelectedType(type.key)}
+          />
+        ))}
+        {categories.length > 0 && (
+          <>
+            <View style={styles.filterDivider} />
+            <FilterChip
+              label="All"
+              selected={!selectedCategory}
+              onPress={() => setSelectedCategory('')}
+            />
+          </>
+        )}
+        {categories.map((cat) => (
+          <FilterChip
+            key={cat.id}
+            label={cat.name}
+            selected={selectedCategory === cat.id}
+            onPress={() => setSelectedCategory(cat.id)}
+          />
+        ))}
+        {hasFilters && (
+          <TouchableOpacity onPress={clearFilters} style={[styles.clearFilterButton, { backgroundColor: COLORS.error + '15' }]}>
+            <Ionicons name="close-circle" size={16} color={COLORS.error} />
+            <Text style={[styles.clearFilterText, { color: COLORS.error }]}>Clear</Text>
           </TouchableOpacity>
         )}
-      </View>
+        </ScrollView>
+      </AnimatedView>
 
-      <View style={styles.sortContainer}>
-        <TouchableOpacity
-          style={[styles.sortButton, sortBy === 'title' && styles.sortButtonActive]}
-          onPress={() => setSortBy('title')}
-        >
-          <Text style={[styles.sortText, sortBy === 'title' && styles.sortTextActive]}>A-Z</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.sortButton, sortBy === 'date' && styles.sortButtonActive]}
-          onPress={() => setSortBy('date')}
-        >
-          <Text style={[styles.sortText, sortBy === 'date' && styles.sortTextActive]}>Newest</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.sortButton, sortBy === 'author' && styles.sortButtonActive]}
-          onPress={() => setSortBy('author')}
-        >
-          <Text style={[styles.sortText, sortBy === 'author' && styles.sortTextActive]}>Author</Text>
-        </TouchableOpacity>
-      </View>
+      <AnimatedView fadeDelay={250} fadeDuration={400} slideDirection="up" slideDistance={15}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.sortContainer}>
+        {[
+          { key: 'title' as const, label: 'A-Z' },
+          { key: 'date' as const, label: 'Newest' },
+          { key: 'author' as const, label: 'Author' },
+        ].map((sort) => (
+          <TouchableOpacity
+            key={sort.key}
+            activeOpacity={0.7}
+            style={[
+              styles.sortButton,
+              { backgroundColor: colors.surfaceVariant },
+              sortBy === sort.key && { backgroundColor: COLORS.royalPurple },
+            ]}
+            onPress={() => setSortBy(sort.key)}
+          >
+            <Text
+              style={[
+                styles.sortText,
+                { color: colors.textSecondary },
+                sortBy === sort.key && { color: COLORS.white },
+              ]}
+            >
+              {sort.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+        </ScrollView>
+      </AnimatedView>
 
       {isLoading ? (
         <View style={styles.loadingContainer}>
@@ -118,15 +247,15 @@ export default function LibraryScreen() {
           data={filteredBooks}
           renderItem={renderBook}
           keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.listContent}
+          contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + SPACING.xxl + 20 }]}
         />
       ) : (
         <View style={styles.emptyState}>
-          <Ionicons name="library-outline" size={64} color={COLORS.gray300} />
-          <Text style={styles.emptyTitle}>
+          <Ionicons name="library-outline" size={64} color={colors.textMuted} />
+          <Text style={[styles.emptyTitle, { color: colors.textSecondary }]}>
             {localSearch ? 'No Results Found' : 'Library is Empty'}
           </Text>
-          <Text style={styles.emptySubtitle}>
+          <Text style={[styles.emptySubtitle, { color: colors.textMuted }]}>
             {localSearch
               ? 'Try a different search term.'
               : 'Books will appear here when added by the administrator.'}
@@ -140,115 +269,102 @@ export default function LibraryScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.lightBackground,
   },
-  header: {
+  gradientHeader: {
     paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.md,
+    paddingBottom: SPACING.md,
   },
   headerTitle: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: COLORS.deepNavy,
+    fontSize: FONT_SIZE.xxl,
+    fontWeight: '800',
+    color: COLORS.white,
+    marginBottom: SPACING.md,
   },
-  searchContainer: {
+  headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.white,
-    marginHorizontal: SPACING.md,
+    justifyContent: 'space-between',
     marginBottom: SPACING.md,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-    borderRadius: BORDER_RADIUS.md,
-    shadowColor: COLORS.deepNavy,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
   },
-  searchIcon: {
-    marginRight: SPACING.sm,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 14,
-    color: COLORS.deepNavy,
-    height: 40,
+  globalSearchButton: {
+    padding: SPACING.sm,
   },
   sortContainer: {
     flexDirection: 'row',
     paddingHorizontal: SPACING.md,
-    marginBottom: SPACING.md,
-    gap: SPACING.sm,
+    marginBottom: SPACING.sm,
+    gap: 8,
+    paddingRight: SPACING.md,
   },
-  sortButton: {
+  filterContainer: {
     paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-    borderRadius: BORDER_RADIUS.full,
-    backgroundColor: COLORS.white,
+    paddingVertical: 8,
+    gap: 8,
+    paddingRight: SPACING.md,
   },
-  sortButtonActive: {
-    backgroundColor: COLORS.royalPurple,
+  filterDivider: {
+    width: 1,
+    marginHorizontal: SPACING.xs,
   },
-  sortText: {
-    fontSize: 12,
-    color: COLORS.gray500,
+  clearFilterButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 6,
+    borderRadius: 20,
+    gap: 4,
+  },
+  clearFilterText: {
+    fontSize: FONT_SIZE.sm,
     fontWeight: '500',
   },
-  sortTextActive: {
-    color: COLORS.white,
+  sortButton: {
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 6,
+    borderRadius: BORDER_RADIUS.full,
+  },
+  sortText: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '600',
   },
   listContent: {
     padding: SPACING.md,
+    // paddingBottom is set dynamically with safe-area inset
   },
   bookItem: {
     flexDirection: 'row',
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.md,
+    alignItems: 'center',
+    borderRadius: BORDER_RADIUS.lg,
     padding: SPACING.md,
     marginBottom: SPACING.sm,
-    shadowColor: COLORS.deepNavy,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
+    ...SHADOWS.card,
   },
   bookCover: {
-    width: 50,
-    height: 70,
-    borderRadius: BORDER_RADIUS.sm,
+    borderRadius: BORDER_RADIUS.md,
     overflow: 'hidden',
     marginRight: SPACING.md,
-  },
-  coverPlaceholder: {
-    width: '100%',
-    height: '100%',
-    backgroundColor: COLORS.royalPurple,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   audioBadge: {
     position: 'absolute',
     top: 3,
     right: 3,
-    backgroundColor: COLORS.gold,
     paddingHorizontal: 4,
     paddingVertical: 2,
-    borderRadius: 6,
+    borderRadius: 8,
+    backgroundColor: COLORS.royalPurple,
   },
   bookInfo: {
     flex: 1,
     justifyContent: 'center',
   },
   bookTitle: {
-    fontSize: 14,
+    fontSize: FONT_SIZE.md,
     fontWeight: '600',
-    color: COLORS.deepNavy,
     marginBottom: 2,
+    lineHeight: 20,
   },
   bookAuthor: {
-    fontSize: 12,
-    color: COLORS.gray500,
+    fontSize: FONT_SIZE.sm,
     marginBottom: SPACING.xs,
   },
   bookMeta: {
@@ -259,10 +375,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
   },
   metaText: {
-    fontSize: 10,
-    color: COLORS.gray500,
+    fontSize: FONT_SIZE.xs,
+    fontWeight: '500',
   },
   loadingContainer: {
     flex: 1,
@@ -276,14 +395,12 @@ const styles = StyleSheet.create({
     padding: SPACING.xl,
   },
   emptyTitle: {
-    fontSize: 18,
+    fontSize: FONT_SIZE.xl,
     fontWeight: '600',
-    color: COLORS.gray600,
     marginTop: SPACING.md,
   },
   emptySubtitle: {
-    fontSize: 14,
-    color: COLORS.gray400,
+    fontSize: FONT_SIZE.md,
     textAlign: 'center',
     marginTop: SPACING.sm,
   },

@@ -5,7 +5,6 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  SafeAreaView,
   StatusBar,
   ActivityIndicator,
   Alert,
@@ -16,7 +15,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { COLORS, SPACING, BORDER_RADIUS } from '@/constants/theme';
 import { supabase } from '@/lib/supabase/client';
-import * as FileSystem from 'expo-file-system';
+import { useTheme } from '@/lib/theme/ThemeContext';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as FileSystem from 'expo-file-system/legacy';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 interface DownloadedBook {
   id: string;
@@ -32,6 +34,8 @@ interface DownloadedBook {
 export default function DownloadsScreen() {
   const router = useRouter();
   const { offlineMode, setOfflineMode } = useSettingsStore();
+  const { colors, isDark } = useTheme();
+  const insets = useSafeAreaInsets();
   const [downloads, setDownloads] = useState<DownloadedBook[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [totalSize, setTotalSize] = useState(0);
@@ -142,15 +146,15 @@ export default function DownloadsScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" />
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['left', 'right']}>
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
       
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + SPACING.md, backgroundColor: colors.surface }]}>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color={COLORS.deepNavy} />
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Downloads</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Downloads</Text>
       </View>
 
       {/* Offline Mode Toggle */}
@@ -194,7 +198,7 @@ export default function DownloadsScreen() {
           </Text>
         </View>
       ) : (
-        <ScrollView style={styles.content}>
+        <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: insets.bottom + SPACING.xxl + 20 }}>
           {downloads.map((book) => (
             <View key={book.id} style={styles.downloadCard}>
               <TouchableOpacity
@@ -246,14 +250,12 @@ export default function DownloadsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.lightBackground,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.md,
-    backgroundColor: COLORS.white,
+    paddingBottom: SPACING.md,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.gray200,
   },

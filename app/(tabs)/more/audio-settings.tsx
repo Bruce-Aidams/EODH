@@ -5,7 +5,6 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  SafeAreaView,
   StatusBar,
   Switch,
   Alert,
@@ -15,6 +14,9 @@ import { Ionicons } from '@expo/vector-icons';
 import Slider from '@react-native-community/slider';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { COLORS, SPACING, BORDER_RADIUS } from '@/constants/theme';
+import { useTheme } from '@/lib/theme/ThemeContext';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const PLAYBACK_SPEEDS = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
 const SLEEP_TIMERS = [
@@ -30,6 +32,8 @@ const SLEEP_TIMERS = [
 export default function AudioSettingsScreen() {
   const router = useRouter();
   const { audioSettings, setAudioSettings } = useSettingsStore();
+  const { colors, isDark } = useTheme();
+  const insets = useSafeAreaInsets();
   const [sleepTimerIndex, setSleepTimerIndex] = useState(
     SLEEP_TIMERS.findIndex(t => t.value === audioSettings.sleepTimerMinutes)
   );
@@ -40,21 +44,21 @@ export default function AudioSettingsScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" />
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['left', 'right']}>
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
       
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + SPACING.md, backgroundColor: colors.surface }]}>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color={COLORS.deepNavy} />
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Audio Settings</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Audio Settings</Text>
       </View>
 
-      <ScrollView style={styles.content}>
+      <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: insets.bottom + SPACING.xxl + 20 }}>
         {/* Default Playback Speed */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Default Playback Speed</Text>
+        <View style={[styles.section, { backgroundColor: colors.surface }]}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Default Playback Speed</Text>
           <Text style={styles.sectionSubtitle}>
             Set the default speed for audiobook playback
           </Text>
@@ -80,8 +84,8 @@ export default function AudioSettingsScreen() {
         </View>
 
         {/* Playback Speed Slider */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Speed Preview</Text>
+        <View style={[styles.section, { backgroundColor: colors.surface }]}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Speed Preview</Text>
           <View style={styles.sliderContainer}>
             <Ionicons name="play-circle-outline" size={18} color={COLORS.gray400} />
             <Slider
@@ -104,8 +108,8 @@ export default function AudioSettingsScreen() {
         </View>
 
         {/* Sleep Timer */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Sleep Timer</Text>
+        <View style={[styles.section, { backgroundColor: colors.surface }]}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Sleep Timer</Text>
           <Text style={styles.sectionSubtitle}>
             Automatically stop playback after a set time
           </Text>
@@ -131,7 +135,7 @@ export default function AudioSettingsScreen() {
         </View>
 
         {/* Background Playback */}
-        <View style={styles.section}>
+        <View style={[styles.section, { backgroundColor: colors.surface }]}>
           <View style={styles.settingRow}>
             <View style={styles.settingIcon}>
               <Ionicons name="phone-portrait" size={22} color={COLORS.royalPurple} />
@@ -152,7 +156,7 @@ export default function AudioSettingsScreen() {
         </View>
 
         {/* Lock Screen Controls */}
-        <View style={styles.section}>
+        <View style={[styles.section, { backgroundColor: colors.surface }]}>
           <View style={styles.settingRow}>
             <View style={styles.settingIcon}>
               <Ionicons name="lock-closed" size={22} color={COLORS.royalPurple} />
@@ -173,7 +177,7 @@ export default function AudioSettingsScreen() {
         </View>
 
         {/* Headphone Controls */}
-        <View style={styles.section}>
+        <View style={[styles.section, { backgroundColor: colors.surface }]}>
           <View style={styles.settingRow}>
             <View style={styles.settingIcon}>
               <Ionicons name="headset" size={22} color={COLORS.royalPurple} />
@@ -194,8 +198,8 @@ export default function AudioSettingsScreen() {
         </View>
 
         {/* TTS Voice */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>TTS Voice</Text>
+        <View style={[styles.section, { backgroundColor: colors.surface }]}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>TTS Voice</Text>
           <Text style={styles.sectionSubtitle}>
             Voice used for text-to-speech narration
           </Text>
@@ -213,14 +217,12 @@ export default function AudioSettingsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.lightBackground,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.md,
-    backgroundColor: COLORS.white,
+    paddingBottom: SPACING.md,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.gray200,
   },
@@ -240,7 +242,6 @@ const styles = StyleSheet.create({
     padding: SPACING.md,
   },
   section: {
-    backgroundColor: COLORS.white,
     borderRadius: BORDER_RADIUS.md,
     padding: SPACING.md,
     marginBottom: SPACING.md,
@@ -253,7 +254,6 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 15,
     fontWeight: '700',
-    color: COLORS.deepNavy,
     marginBottom: 4,
   },
   sectionSubtitle: {

@@ -5,6 +5,7 @@ export interface User {
   email: string;
   display_name: string | null;
   avatar_url: string | null;
+  bio: string | null;
   role: 'reader' | 'admin';
   created_at: string;
   updated_at: string;
@@ -18,13 +19,17 @@ export interface Book {
   category_id: string | null;
   cover_url: string | null;
   document_url: string | null;
-  document_type: 'pdf' | 'markdown';
+  document_type: 'pdf' | 'markdown' | 'epub' | 'docx';
   file_size: number | null;
   language: string;
   publication_date: string | null;
   is_published: boolean;
   has_audio: boolean;
   audio_type: 'tts' | 'prerecorded' | null;
+  processing_status: 'pending' | 'processing' | 'completed' | 'failed' | null;
+  total_chapters: number | null;
+  total_pages: number | null;
+  content_format: 'original' | 'reflow' | null;
   created_at: string;
   updated_at: string;
 }
@@ -41,6 +46,9 @@ export interface BookChapter {
   book_id: string;
   title: string;
   order_index: number;
+  content: string | null;
+  page_start: number | null;
+  page_end: number | null;
   created_at: string;
 }
 
@@ -58,8 +66,8 @@ export interface AudioSegment {
 }
 
 export interface AudioAlignment {
-  id: string;
-  segment_id: string;
+  id: string | undefined;
+  segment_id: string | null;
   book_id: string;
   chapter_id: string | null;
   text: string;
@@ -140,10 +148,22 @@ export interface UserPreferences {
   line_spacing: number;
   text_alignment: 'left' | 'center' | 'justify';
   background_color: string;
-  theme: 'light' | 'dark' | 'sepia' | 'system';
+  theme: 'light' | 'dark' | 'system';
   reading_margins: number;
   playback_speed: number;
   sleep_timer_minutes: number | null;
+  updated_at: string;
+}
+
+export interface BookProcessingJob {
+  id: string;
+  book_id: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  error_message: string | null;
+  progress_percent: number | null;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
   updated_at: string;
 }
 
@@ -174,7 +194,7 @@ export type ReadingSettings = {
   lineSpacing: number;
   textAlign: 'left' | 'center' | 'justify';
   backgroundColor: string;
-  theme: 'light' | 'dark' | 'sepia';
+  theme: 'light' | 'dark' | 'system' | 'blue';
   margins: number;
 };
 

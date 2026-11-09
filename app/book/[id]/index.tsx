@@ -6,25 +6,31 @@ import {
   ScrollView,
   TouchableOpacity,
   Image,
-  SafeAreaView,
   StatusBar,
   ActivityIndicator,
   Alert,
+  Dimensions,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
+import { getInfoAsync, makeDirectoryAsync, createDownloadResumable, deleteAsync, writeAsStringAsync } from 'expo-file-system/legacy';
 import { supabase } from '@/lib/supabase/client';
 import { useLibraryStore } from '@/stores/libraryStore';
 import { useToast } from '@/lib/notifications/toast';
 import { Book } from '@/types';
-import { COLORS, SPACING, BORDER_RADIUS } from '@/constants/theme';
+import { SPACING, BORDER_RADIUS } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
+import { useTheme } from '@/lib/theme/ThemeContext';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function BookDetailScreen() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
   const { getReadingProgress, getListeningProgress, toggleFavorite, favorites } = useLibraryStore();
   const { showSuccess, showError, showWarning } = useToast();
+  const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const [book, setBook] = useState<Book | null>(null);
   const [loading, setLoading] = useState(true);
   const [readingProgress, setReadingProgress] = useState<number>(0);
@@ -47,8 +53,8 @@ export default function BookDetailScreen() {
     const docUri = `${FileSystem.documentDirectory}eodh/books/${bookId}/document`;
     const audioUri = `${FileSystem.documentDirectory}eodh/books/${bookId}/audio`;
     
-    const docExists = await FileSystem.getInfoAsync(docUri);
-    const audioExists = await FileSystem.getInfoAsync(audioUri);
+    const docExists = await getInfoAsync(docUri);
+    const audioExists = await getInfoAsync(audioUri);
     
     if (docExists.exists || audioExists.exists) {
       setIsDownloaded(true);
@@ -69,11 +75,11 @@ export default function BookDetailScreen() {
 
       if (data) {
         setBook(data);
-        const rp = await getReadingProgress(bookId);
+        const rp = await getReadingProgress(bookId!);
         if (rp) setReadingProgress(rp.progress_percent);
-        const lp = await getListeningProgress(bookId);
+        const lp = await getListeningProgress(bookId!);
         if (lp) setListeningProgress(lp.progress_percent);
-        setIsFavorite(favorites.includes(bookId));
+        setIsFavorite(favorites.includes(bookId!));
       }
     } catch {
       // Book not found
@@ -82,7 +88,7 @@ export default function BookDetailScreen() {
   };
 
   const handleToggleFavorite = () => {
-    toggleFavorite(bookId);
+    toggleFavorite(bookId!);
     setIsFavorite(!isFavorite);
   };
 
@@ -96,19 +102,18 @@ export default function BookDetailScreen() {
       const downloadDir = `${FileSystem.documentDirectory}eodh/books/${bookId}/`;
       
       // Create directory
-      const dirInfo = await FileSystem.getInfoAsync(downloadDir);
+      const dirInfo = await getInfoAsync(downloadDir);
       if (!dirInfo.exists) {
-        await FileSystem.makeDirectoryAsync(downloadDir, { intermediates: true });
+        await makeDirectoryAsync(downloadDir, { intermediates: true });
       }
 
-      // Download document if available
       if (book.document_url) {
         const downloadUri = `${downloadDir}document`;
-        const downloadingTask = FileSystem.createDownloadResumableSession(
+        const downloadingTask = createDownloadResumable(
           book.document_url,
           downloadUri,
           {},
-          (downloadProgressSummary) => {
+          (downloadProgressSummary: any) => {
             const progress = (downloadProgressSummary.bytesWritten / downloadProgressSummary.totalBytesExpectedToWrite) * 100;
             setDownloadProgress(progress);
           }
@@ -120,7 +125,7 @@ export default function BookDetailScreen() {
           setLocalDocumentUri(downloadResult.uri);
           
           // Save metadata
-          await FileSystem.writeAsStringAsync(
+          await writeAsStringAsync(
             `${downloadDir}metadata.json`,
             JSON.stringify({
               bookId: book.id,
@@ -157,10 +162,10 @@ export default function BookDetailScreen() {
           onPress: async () => {
             try {
               const downloadDir = `${FileSystem.documentDirectory}eodh/books/${bookId}/`;
-              const dirInfo = await FileSystem.getInfoAsync(downloadDir);
+              const dirInfo = await getInfoAsync(downloadDir);
               
               if (dirInfo.exists) {
-                await FileSystem.deleteAsync(downloadDir, { idempotent: true });
+                await deleteAsync(downloadDir, { idempotent: true });
               }
               
               setIsDownloaded(false);
@@ -178,38 +183,38 @@ export default function BookDetailScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={COLORS.royalPurple} />
+      <SafeAreaView style={[styles.loadingContainer, { backgroundColor: colors.background }]} edges={['left', 'right']}>
+        <ActivityIndicator size="large" color={colors.primary} />
       </SafeAreaView>
     );
   }
 
   if (!book) {
     return (
-      <SafeAreaView style={styles.emptyContainer}>
-        <Ionicons name="book-outline" size={64} color={COLORS.gray300} />
-        <Text style={styles.emptyTitle}>Book Not Found</Text>
+      <SafeAreaView style={[styles.emptyContainer, { backgroundColor: colors.background }]} edges={['left', 'right']}>
+        <Ionicons name="book-outline" size={64} color={colors.textMuted} />
+        <Text style={[styles.emptyTitle, { color: colors.textSecondary }]}>Book Not Found</Text>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <Text style={styles.backButtonText}>Go Back</Text>
+          <Text style={[styles.backButtonText, { color: colors.primary }]}>Go Back</Text>
         </TouchableOpacity>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" />
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['left', 'right']}>
+      <StatusBar barStyle={colors.statusBar} />
+      <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + SPACING.xxl + 20 }]}>
         {/* Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: insets.top + SPACING.md }]}>
           <TouchableOpacity onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color={COLORS.deepNavy} />
+            <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
           <TouchableOpacity onPress={handleToggleFavorite}>
             <Ionicons
               name={isFavorite ? 'heart' : 'heart-outline'}
               size={24}
-              color={isFavorite ? COLORS.error : COLORS.gray400}
+              color={isFavorite ? colors.error : colors.textMuted}
             />
           </TouchableOpacity>
         </View>
@@ -221,7 +226,7 @@ export default function BookDetailScreen() {
           ) : (
             <View style={styles.coverPlaceholder}>
               <View style={styles.coverGradient} />
-              <Ionicons name="book" size={48} color={COLORS.white} />
+              <Ionicons name="book" size={48} color="#FFFFFF" />
               <Text style={styles.coverTitle}>{book.title}</Text>
             </View>
           )}
@@ -229,28 +234,28 @@ export default function BookDetailScreen() {
 
         {/* Book Info */}
         <View style={styles.infoSection}>
-          <Text style={styles.title}>{book.title}</Text>
-          <Text style={styles.author}>{book.author}</Text>
+          <Text style={[styles.title, { color: colors.text }]}>{book.title}</Text>
+          <Text style={[styles.author, { color: colors.textSecondary }]}>{book.author}</Text>
 
           <View style={styles.metaRow}>
             <View style={styles.metaBadge}>
               <Ionicons
                 name={book.document_type === 'pdf' ? 'document-text' : 'code-slash'}
                 size={14}
-                color={COLORS.royalPurple}
+                color={colors.primary}
               />
-              <Text style={styles.metaText}>{book.document_type.toUpperCase()}</Text>
+              <Text style={[styles.metaText, { color: colors.textSecondary }]}>{book.document_type.toUpperCase()}</Text>
             </View>
             {book.has_audio && (
               <View style={[styles.metaBadge, styles.audioBadge]}>
-                <Ionicons name="headset" size={14} color={COLORS.white} />
+                <Ionicons name="headset" size={14} color="#FFFFFF" />
                 <Text style={[styles.metaText, styles.audioBadgeText]}>Audio</Text>
               </View>
             )}
             {book.publication_date && (
               <View style={styles.metaBadge}>
-                <Ionicons name="calendar" size={14} color={COLORS.gray500} />
-                <Text style={styles.metaText}>
+                <Ionicons name="calendar" size={14} color={colors.textSecondary} />
+                <Text style={[styles.metaText, { color: colors.textSecondary }]}>
                   {new Date(book.publication_date).getFullYear()}
                 </Text>
               </View>
@@ -259,8 +264,8 @@ export default function BookDetailScreen() {
 
           {book.description ? (
             <View style={styles.descriptionSection}>
-              <Text style={styles.sectionLabel}>Description</Text>
-              <Text style={styles.description}>{book.description}</Text>
+              <Text style={[styles.sectionLabel, { color: colors.text }]}>Description</Text>
+              <Text style={[styles.description, { color: colors.textSecondary }]}>{book.description}</Text>
             </View>
           ) : null}
 
@@ -268,11 +273,11 @@ export default function BookDetailScreen() {
           {readingProgress > 0 && (
             <View style={styles.progressSection}>
               <View style={styles.progressHeader}>
-                <Text style={styles.sectionLabel}>Reading Progress</Text>
-                <Text style={styles.progressPercent}>{Math.round(readingProgress)}%</Text>
+                <Text style={[styles.sectionLabel, { color: colors.text }]}>Reading Progress</Text>
+                <Text style={[styles.progressPercent, { color: colors.textSecondary }]}>{Math.round(readingProgress)}%</Text>
               </View>
-              <View style={styles.progressBar}>
-                <View style={[styles.progressFill, { width: `${readingProgress}%` }]} />
+              <View style={[styles.progressBar, { backgroundColor: colors.border }]}>
+                <View style={[styles.progressFill, { width: `${readingProgress}%`, backgroundColor: colors.primary }]} />
               </View>
             </View>
           )}
@@ -280,11 +285,11 @@ export default function BookDetailScreen() {
           {listeningProgress > 0 && (
             <View style={styles.progressSection}>
               <View style={styles.progressHeader}>
-                <Text style={styles.sectionLabel}>Listening Progress</Text>
-                <Text style={styles.progressPercent}>{Math.round(listeningProgress)}%</Text>
+                <Text style={[styles.sectionLabel, { color: colors.text }]}>Listening Progress</Text>
+                <Text style={[styles.progressPercent, { color: colors.textSecondary }]}>{Math.round(listeningProgress)}%</Text>
               </View>
-              <View style={styles.progressBar}>
-                <View style={[styles.progressFill, { width: `${listeningProgress}%` }]} />
+              <View style={[styles.progressBar, { backgroundColor: colors.border }]}>
+                <View style={[styles.progressFill, { width: `${listeningProgress}%`, backgroundColor: colors.primary }]} />
               </View>
             </View>
           )}
@@ -293,66 +298,66 @@ export default function BookDetailScreen() {
         {/* Action Buttons */}
         <View style={styles.actionsSection}>
           <TouchableOpacity
-            style={styles.actionButton}
+            style={[styles.actionButton, { backgroundColor: colors.card, shadowColor: colors.cardShadow }]}
             onPress={() => router.push(`/book/${book.id}/reader`)}
           >
-            <View style={styles.actionIconContainer}>
-              <Ionicons name="book" size={24} color={COLORS.white} />
+            <View style={[styles.actionIconContainer, { backgroundColor: colors.primary }]}>
+              <Ionicons name="book" size={24} color="#FFFFFF" />
             </View>
             <View style={styles.actionInfo}>
-              <Text style={styles.actionLabel}>Read</Text>
-              <Text style={styles.actionSubtext}>Open ebook reader</Text>
+              <Text style={[styles.actionLabel, { color: colors.text }]}>Read</Text>
+              <Text style={[styles.actionSubtext, { color: colors.textSecondary }]}>Open ebook reader</Text>
             </View>
             {isDownloaded && (
-              <Ionicons name="checkmark-circle" size={20} color={COLORS.success} />
+              <Ionicons name="checkmark-circle" size={20} color={colors.success} />
             )}
           </TouchableOpacity>
 
           {book.has_audio && (
             <TouchableOpacity
-              style={styles.actionButton}
+              style={[styles.actionButton, { backgroundColor: colors.card, shadowColor: colors.cardShadow }]}
               onPress={() => router.push(`/book/${book.id}/audio`)}
             >
-              <View style={[styles.actionIconContainer, { backgroundColor: COLORS.gold }]}>
-                <Ionicons name="play-circle" size={24} color={COLORS.white} />
+              <View style={[styles.actionIconContainer, { backgroundColor: colors.primary }]}>
+                <Ionicons name="play-circle" size={24} color="#FFFFFF" />
               </View>
               <View style={styles.actionInfo}>
-                <Text style={styles.actionLabel}>Listen</Text>
-                <Text style={styles.actionSubtext}>Play audiobook</Text>
+                <Text style={[styles.actionLabel, { color: colors.text }]}>Listen</Text>
+                <Text style={[styles.actionSubtext, { color: colors.textSecondary }]}>Play audiobook</Text>
               </View>
             </TouchableOpacity>
           )}
 
-          {book.has_audio && (
-            <TouchableOpacity
-              style={styles.actionButton}
-              onPress={() => router.push(`/book/${book.id}/sync`)}
-            >
-              <View style={[styles.actionIconContainer, { backgroundColor: COLORS.violet }]}>
-                <Ionicons name="sync-circle" size={24} color={COLORS.white} />
-              </View>
-              <View style={styles.actionInfo}>
-                <Text style={styles.actionLabel}>Read Along</Text>
-                <Text style={styles.actionSubtext}>Sync text with audio</Text>
-              </View>
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity
+            style={[styles.actionButton, { backgroundColor: colors.card, shadowColor: colors.cardShadow }]}
+            onPress={() => router.push(`/book/${book.id}/sync`)}
+          >
+            <View style={[styles.actionIconContainer, { backgroundColor: colors.primary }]}>
+              <Ionicons name="sync-circle" size={24} color="#FFFFFF" />
+            </View>
+            <View style={styles.actionInfo}>
+              <Text style={[styles.actionLabel, { color: colors.text }]}>Read Along</Text>
+              <Text style={[styles.actionSubtext, { color: colors.textSecondary }]}>
+                {book.has_audio ? 'Sync text with audio' : 'Text-to-speech with highlighting'}
+              </Text>
+            </View>
+          </TouchableOpacity>
 
           {/* Download Button */}
           {!isDownloaded ? (
             <TouchableOpacity
-              style={[styles.actionButton, isDownloading && styles.disabledButton]}
+              style={[styles.actionButton, { backgroundColor: colors.card, shadowColor: colors.cardShadow }, isDownloading && styles.disabledButton]}
               onPress={handleDownload}
               disabled={isDownloading}
             >
-              <View style={[styles.actionIconContainer, { backgroundColor: COLORS.success }]}>
-                <Ionicons name="download" size={24} color={COLORS.white} />
+              <View style={[styles.actionIconContainer, { backgroundColor: colors.primary }]}>
+                <Ionicons name="download" size={24} color="#FFFFFF" />
               </View>
               <View style={styles.actionInfo}>
-                <Text style={styles.actionLabel}>
+                <Text style={[styles.actionLabel, { color: colors.text }]}>
                   {isDownloading ? 'Downloading...' : 'Download for Offline'}
                 </Text>
-                <Text style={styles.actionSubtext}>
+                <Text style={[styles.actionSubtext, { color: colors.textSecondary }]}>
                   {isDownloading 
                     ? `${Math.round(downloadProgress)}% complete` 
                     : 'Read without internet connection'
@@ -362,17 +367,17 @@ export default function BookDetailScreen() {
             </TouchableOpacity>
           ) : (
             <TouchableOpacity
-              style={styles.actionButton}
+              style={[styles.actionButton, { backgroundColor: colors.card, shadowColor: colors.cardShadow }]}
               onPress={handleRemoveDownload}
             >
-              <View style={[styles.actionIconContainer, { backgroundColor: COLORS.gray500 }]}>
-                <Ionicons name="cloud-offline" size={24} color={COLORS.white} />
+              <View style={[styles.actionIconContainer, { backgroundColor: colors.textSecondary }]}>
+                <Ionicons name="cloud-offline" size={24} color="#FFFFFF" />
               </View>
               <View style={styles.actionInfo}>
-                <Text style={styles.actionLabel}>Downloaded</Text>
-                <Text style={styles.actionSubtext}>Tap to remove downloaded files</Text>
+                <Text style={[styles.actionLabel, { color: colors.text }]}>Downloaded</Text>
+                <Text style={[styles.actionSubtext, { color: colors.textSecondary }]}>Tap to remove downloaded files</Text>
               </View>
-              <Ionicons name="checkmark-circle" size={20} color={COLORS.success} />
+              <Ionicons name="checkmark-circle" size={20} color={colors.success} />
             </TouchableOpacity>
           )}
         </View>
@@ -384,17 +389,14 @@ export default function BookDetailScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.lightBackground,
   },
   loadingContainer: {
     flex: 1,
-    backgroundColor: COLORS.lightBackground,
     alignItems: 'center',
     justifyContent: 'center',
   },
   emptyContainer: {
     flex: 1,
-    backgroundColor: COLORS.lightBackground,
     alignItems: 'center',
     justifyContent: 'center',
     padding: SPACING.xl,
@@ -402,18 +404,15 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: COLORS.gray600,
     marginTop: SPACING.md,
   },
   backButton: {
     marginTop: SPACING.lg,
     paddingHorizontal: SPACING.lg,
     paddingVertical: SPACING.md,
-    backgroundColor: COLORS.royalPurple,
     borderRadius: BORDER_RADIUS.md,
   },
   backButtonText: {
-    color: COLORS.white,
     fontSize: 15,
     fontWeight: '600',
   },
@@ -428,36 +427,36 @@ const styles = StyleSheet.create({
   coverContainer: {
     alignItems: 'center',
     marginBottom: SPACING.lg,
+    maxWidth: 200,
+    width: '60%',
   },
   coverImage: {
-    width: 200,
-    height: 280,
+    width: '100%',
+    maxWidth: 200,
+    aspectRatio: 200 / 280,
     borderRadius: BORDER_RADIUS.lg,
-    shadowColor: COLORS.deepNavy,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.15,
     shadowRadius: 16,
     elevation: 6,
   },
   coverPlaceholder: {
-    width: 200,
-    height: 280,
+    width: '100%',
+    maxWidth: 200,
+    aspectRatio: 200 / 280,
     borderRadius: BORDER_RADIUS.lg,
     overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: COLORS.deepNavy,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.15,
     shadowRadius: 16,
     elevation: 6,
   },
   coverGradient: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: COLORS.royalPurple,
+    ...StyleSheet.absoluteFill,
   },
   coverTitle: {
-    color: COLORS.white,
     fontSize: 16,
     fontWeight: '600',
     textAlign: 'center',
@@ -471,23 +470,23 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: COLORS.deepNavy,
     marginBottom: SPACING.xs,
+    textAlign: 'center',
   },
   author: {
     fontSize: 16,
-    color: COLORS.gray500,
     marginBottom: SPACING.md,
+    textAlign: 'center',
   },
   metaRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: SPACING.sm,
     marginBottom: SPACING.md,
   },
   metaBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.white,
     paddingHorizontal: SPACING.sm,
     paddingVertical: 4,
     borderRadius: BORDER_RADIUS.full,
@@ -495,14 +494,11 @@ const styles = StyleSheet.create({
   },
   metaText: {
     fontSize: 12,
-    color: COLORS.gray500,
     fontWeight: '500',
   },
   audioBadge: {
-    backgroundColor: COLORS.gold,
   },
   audioBadgeText: {
-    color: COLORS.white,
   },
   descriptionSection: {
     marginTop: SPACING.md,
@@ -510,15 +506,14 @@ const styles = StyleSheet.create({
   sectionLabel: {
     fontSize: 13,
     fontWeight: '600',
-    color: COLORS.gray500,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     marginBottom: SPACING.xs,
   },
   description: {
     fontSize: 14,
-    color: COLORS.gray600,
     lineHeight: 20,
+    overflow: 'hidden',
   },
   progressSection: {
     marginTop: SPACING.md,
@@ -532,17 +527,14 @@ const styles = StyleSheet.create({
   progressPercent: {
     fontSize: 13,
     fontWeight: '600',
-    color: COLORS.royalPurple,
   },
   progressBar: {
     height: 6,
-    backgroundColor: COLORS.gray200,
     borderRadius: 3,
     overflow: 'hidden',
   },
   progressFill: {
     height: '100%',
-    backgroundColor: COLORS.royalPurple,
     borderRadius: 3,
   },
   actionsSection: {
@@ -552,10 +544,8 @@ const styles = StyleSheet.create({
   actionButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.white,
     borderRadius: BORDER_RADIUS.md,
     padding: SPACING.md,
-    shadowColor: COLORS.deepNavy,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 8,
@@ -568,7 +558,6 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: COLORS.royalPurple,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: SPACING.md,
@@ -579,11 +568,11 @@ const styles = StyleSheet.create({
   actionLabel: {
     fontSize: 16,
     fontWeight: '600',
-    color: COLORS.deepNavy,
+    flexShrink: 1,
   },
   actionSubtext: {
     fontSize: 12,
-    color: COLORS.gray500,
     marginTop: 2,
+    flexShrink: 1,
   },
 });

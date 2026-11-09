@@ -5,7 +5,6 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  SafeAreaView,
   StatusBar,
   Linking,
   Alert,
@@ -13,6 +12,9 @@ import {
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, BORDER_RADIUS } from '@/constants/theme';
+import { useTheme } from '@/lib/theme/ThemeContext';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const FAQ_ITEMS = [
   {
@@ -43,24 +45,26 @@ const FAQ_ITEMS = [
 
 export default function HelpScreen() {
   const router = useRouter();
+  const { colors, isDark } = useTheme();
+  const insets = useSafeAreaInsets();
 
   const openEmail = () => {
     Linking.openURL('mailto:support@eodh.app?subject=EODH Support Request');
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" />
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['left', 'right']}>
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
       
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + SPACING.md, backgroundColor: colors.surface }]}>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color={COLORS.deepNavy} />
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Help & Support</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Help & Support</Text>
       </View>
 
-      <ScrollView style={styles.content}>
+      <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: insets.bottom + SPACING.xxl + 20 }}>
         {/* Contact Card */}
         <TouchableOpacity style={styles.contactCard} onPress={openEmail}>
           <View style={styles.contactIcon}>
@@ -136,7 +140,7 @@ export default function HelpScreen() {
           <Text style={styles.troubleTitle}>Troubleshooting</Text>
           
           <TouchableOpacity style={styles.troubleItem}>
-            <Ionicons name="wifi-off-outline" size={18} color={COLORS.gray600} />
+            <Ionicons name="wifi-outline" size={18} color={COLORS.gray600} />
             <Text style={styles.troubleText}>App not loading books?</Text>
             <Text style={styles.troubleHint}>Check your internet connection</Text>
           </TouchableOpacity>
@@ -161,14 +165,12 @@ export default function HelpScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.lightBackground,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.md,
-    backgroundColor: COLORS.white,
+    paddingBottom: SPACING.md,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.gray200,
   },

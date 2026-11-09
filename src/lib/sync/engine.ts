@@ -1,5 +1,6 @@
 import { AudioAlignment, AudioSegment } from '@/types';
 import { TTSSegment, ttsEngine } from '@/lib/tts/engine';
+import TTSEngine from '@/lib/tts/engine';
 
 /**
  * Synchronization Engine for EODH
@@ -15,7 +16,7 @@ import { TTSSegment, ttsEngine } from '@/lib/tts/engine';
  */
 
 export interface SyncPosition {
-  segmentId: string;
+  segmentId: string | null;
   text: string;
   pageNumber: number | null;
   textOffsetStart: number | null;
@@ -89,7 +90,7 @@ export class SyncEngine {
     this.sentences = text.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 0).map(s => s.trim());
     
     // Create TTS segments
-    this.ttsSegments = TTSEngine.splitIntoSegments(text);
+    this.ttsSegments = TTSEngine.splitIntoSegments(text, 0);
     
     // Set up TTS callbacks for sync
     ttsEngine.setOnChunkBegin((utterance, charIndex, length) => {
@@ -251,10 +252,10 @@ export class SyncEngine {
       const text = lines.slice(2).join(' ').trim();
       
       alignments.push({
-        id: `srt-${alignments.length}`,
-        segment_id: `srt-${alignments.length}`,
+        id: undefined,
+        segment_id: null,
         book_id: bookId,
-        chapter_id: chapterId,
+        chapter_id: null,
         text,
         start_time: startTime,
         end_time: endTime,
@@ -293,10 +294,10 @@ export class SyncEngine {
       const text = lines.slice(timeLineIndex + 1).join(' ').trim();
       
       alignments.push({
-        id: `vtt-${alignments.length}`,
-        segment_id: `vtt-${alignments.length}`,
+        id: undefined,
+        segment_id: null,
         book_id: bookId,
-        chapter_id: chapterId,
+        chapter_id: null,
         text,
         start_time: startTime,
         end_time: endTime,
@@ -334,8 +335,8 @@ export class SyncEngine {
       const duration = (wordCount / wordsPerMinute) * 60;
       
       alignments.push({
-        id: `tts-est-${alignments.length}`,
-        segment_id: `tts-est-${alignments.length}`,
+        id: undefined,
+        segment_id: null,
         book_id: bookId,
         chapter_id: null,
         text: sentence,
@@ -379,7 +380,7 @@ export class SyncEngine {
     startTime: number,
     endTime: number,
     bookId: string,
-    segmentId: string,
+    segmentId: string | null,
     speed: number = 1.0
   ): WordPosition[] {
     const words = text.split(/(\s+)/).filter(w => w.trim().length > 0);

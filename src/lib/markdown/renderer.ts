@@ -13,10 +13,17 @@
 export function markdownToHtml(markdown: string): string {
   let html = markdown;
 
+  // Blockquotes — convert before HTML escaping, using placeholders to protect tags
+  html = html.replace(/^>\s+(.+)$/gm, '%%BLOCKQUOTE_OPEN%%$1%%BLOCKQUOTE_CLOSE%%');
+
   // Escape HTML special characters first (but preserve Markdown syntax)
   html = html.replace(/&/g, '&amp;');
   html = html.replace(/</g, '&lt;');
   html = html.replace(/>/g, '&gt;');
+
+  // Restore blockquote tags
+  html = html.replace(/%%BLOCKQUOTE_OPEN%%/g, '<blockquote>');
+  html = html.replace(/%%BLOCKQUOTE_CLOSE%%/g, '</blockquote>');
 
   // Code blocks (```)
   html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
@@ -37,9 +44,6 @@ export function markdownToHtml(markdown: string): string {
 
   // Horizontal rules
   html = html.replace(/^(---|\*\*\*|___)$/gm, '<hr />');
-
-  // Blockquotes
-  html = html.replace(/^>\s+(.+)$/gm, '<blockquote>$1</blockquote>');
 
   // Images
   html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img alt="$1" src="$2" />');
@@ -80,9 +84,9 @@ export function markdownToHtml(markdown: string): string {
 
   // Tables
   html = html.replace(/^(\|.+\|)\n(\|[-| :]+\|)\n((?:\|.+\|\n?)*)/gm, (_, header, separator, body) => {
-    const headerCells = header.split('|').filter(c => c.trim()).map(c => `<th>${c.trim()}</th>`).join('');
-    const rows = body.trim().split('\n').map(row => {
-      const cells = row.split('|').filter(c => c.trim()).map(c => `<td>${c.trim()}</td>`).join('');
+    const headerCells = header.split('|').filter((c: string) => c.trim()).map((c: string) => `<th>${c.trim()}</th>`).join('');
+    const rows = body.trim().split('\n').map((row: string) => {
+      const cells = row.split('|').filter((c: string) => c.trim()).map((c: string) => `<td>${c.trim()}</td>`).join('');
       return `<tr>${cells}</tr>`;
     }).join('');
     
@@ -93,7 +97,7 @@ export function markdownToHtml(markdown: string): string {
   html = html.split('\n\n').map(block => {
     const trimmed = block.trim();
     if (!trimmed) return '';
-    if (/^<(h[1-6]|ul|ol|li|blockquote|pre|table|hr|img|div)/.test(trimmed)) {
+    if (/^<(h[1-6]|ul|ol|li|blockquote|pre|table|hr|img|div|!-)/.test(trimmed)) {
       return trimmed;
     }
     // Convert line breaks within paragraph
@@ -256,6 +260,7 @@ export const markdownHtmlStyles = {
     fontSize: 16,
     lineHeight: 1.6,
     marginBottom: 12,
+    color: '#1a1a1a',
   },
   strong: {
     fontWeight: 'bold' as const,
@@ -281,6 +286,7 @@ export const markdownHtmlStyles = {
     fontSize: 16,
     lineHeight: 1.4,
     marginBottom: 4,
+    color: '#1a1a1a',
   },
   blockquote: {
     borderLeftWidth: 4,
@@ -308,7 +314,6 @@ export const markdownHtmlStyles = {
   table: {
     width: '100%',
     marginVertical: 12,
-    borderCollapse: 'collapse' as const,
   },
   th: {
     fontWeight: 'bold' as const,
@@ -349,11 +354,13 @@ export const markdownHtmlStylesDark = {
   h4: { ...markdownHtmlStyles.h4, color: '#FFFFFF' },
   h5: { ...markdownHtmlStyles.h5, color: '#FFFFFF' },
   h6: { ...markdownHtmlStyles.h6, color: '#FFFFFF' },
+  p: { ...markdownHtmlStyles.p, color: '#e0e0e0' },
+  li: { ...markdownHtmlStyles.li, color: '#e0e0e0' },
   a: { ...markdownHtmlStyles.a, color: '#812BFF' },
   blockquote: { ...markdownHtmlStyles.blockquote, borderLeftColor: '#812BFF', color: '#aaa' },
-  pre: { ...markdownHtmlStyles.pre, backgroundColor: '#2a2a2a' },
+  pre: { ...markdownHtmlStyles.pre, backgroundColor: '#2a2a2a', color: '#e0e0e0' },
   code: { ...markdownHtmlStyles.code, color: '#ff6b9d' },
-  th: { ...markdownHtmlStyles.th, borderBottomColor: '#444' },
-  td: { ...markdownHtmlStyles.td, borderBottomColor: '#333' },
+  th: { ...markdownHtmlStyles.th, borderBottomColor: '#444', color: '#e0e0e0' },
+  td: { ...markdownHtmlStyles.td, borderBottomColor: '#333', color: '#e0e0e0' },
   hr: { ...markdownHtmlStyles.hr, borderBottomColor: '#444' },
 };

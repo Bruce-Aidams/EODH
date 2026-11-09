@@ -1,4 +1,5 @@
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
+import { getInfoAsync, makeDirectoryAsync, createDownloadResumable, deleteAsync, readDirectoryAsync } from 'expo-file-system/legacy';
 import { supabase } from '@/lib/supabase/client';
 import { Book } from '@/types';
 
@@ -32,9 +33,9 @@ async function ensureDirectories() {
   const dirs = [DOWNLOADS_DIR, DOCUMENTS_DIR, AUDIO_DIR, COVERS_DIR];
   
   for (const dir of dirs) {
-    const dirInfo = await FileSystem.getInfoAsync(dir);
+    const dirInfo = await getInfoAsync(dir);
     if (!dirInfo.exists) {
-      await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+      await makeDirectoryAsync(dir, { intermediates: true });
     }
   }
 }
@@ -68,7 +69,7 @@ export async function isFileDownloaded(bookId: string, fileType: 'document' | 'a
 
     // Check local file exists
     const localPath = getLocalFilePath(bookId, fileType);
-    const fileInfo = await FileSystem.getInfoAsync(localPath);
+    const fileInfo = await getInfoAsync(localPath);
     return fileInfo.exists;
   } catch {
     return false;
@@ -83,7 +84,7 @@ export async function getFileUri(book: Book, fileType: 'document' | 'audio' | 'c
   
   if (downloaded) {
     const localPath = getLocalFilePath(book.id, fileType);
-    const fileInfo = await FileSystem.getInfoAsync(localPath);
+    const fileInfo = await getInfoAsync(localPath);
     if (fileInfo.exists && fileInfo.uri) {
       return fileInfo.uri;
     }
@@ -115,13 +116,13 @@ export async function downloadFile(
     const localPath = getLocalFilePath(bookId, fileType, extension);
 
     // Check if already downloaded
-    const existingInfo = await FileSystem.getInfoAsync(localPath);
+    const existingInfo = await getInfoAsync(localPath);
     if (existingInfo.exists) {
       return localPath;
     }
 
     // Start download
-    const downloadResumable = FileSystem.createDownloadResumable(
+    const downloadResumable = createDownloadResumable(
       fileUrl,
       localPath,
       {},
@@ -278,14 +279,14 @@ async function downloadAudioSegment(
     await ensureDirectories();
 
     // Check if already downloaded
-    const existingInfo = await FileSystem.getInfoAsync(localPath);
+    const existingInfo = await getInfoAsync(localPath);
     if (existingInfo.exists) {
       onProgress?.(1);
       return true;
     }
 
     // Start download
-    const downloadResumable = FileSystem.createDownloadResumable(
+    const downloadResumable = createDownloadResumable(
       fileUrl,
       localPath,
       {},
@@ -346,7 +347,7 @@ export async function getAudioSegmentUri(
   remoteUrl: string | null
 ): Promise<string | null> {
   const localPath = `${AUDIO_DIR}${bookId}_chapter_${chapter}.mp3`;
-  const fileInfo = await FileSystem.getInfoAsync(localPath);
+  const fileInfo = await getInfoAsync(localPath);
   
   if (fileInfo.exists && fileInfo.uri) {
     return fileInfo.uri;
@@ -363,7 +364,7 @@ export async function isAudiobookDownloaded(bookId: string, segmentCount: number
 
   for (let i = 1; i <= segmentCount; i++) {
     const localPath = `${AUDIO_DIR}${bookId}_chapter_${i}.mp3`;
-    const fileInfo = await FileSystem.getInfoAsync(localPath);
+    const fileInfo = await getInfoAsync(localPath);
     if (fileInfo.exists) {
       downloadedCount++;
     }
@@ -380,7 +381,7 @@ export async function getDownloadedChapterCount(bookId: string, segmentCount: nu
 
   for (let i = 1; i <= segmentCount; i++) {
     const localPath = `${AUDIO_DIR}${bookId}_chapter_${i}.mp3`;
-    const fileInfo = await FileSystem.getInfoAsync(localPath);
+    const fileInfo = await getInfoAsync(localPath);
     if (fileInfo.exists) {
       count++;
     }
@@ -395,10 +396,10 @@ export async function getDownloadedChapterCount(bookId: string, segmentCount: nu
 export async function removeDownloadedFile(bookId: string, fileType: 'document' | 'audio' | 'cover'): Promise<boolean> {
   try {
     const localPath = getLocalFilePath(bookId, fileType);
-    const fileInfo = await FileSystem.getInfoAsync(localPath);
+    const fileInfo = await getInfoAsync(localPath);
 
     if (fileInfo.exists) {
-      await FileSystem.deleteAsync(localPath, { idempotent: true });
+      await deleteAsync(localPath, { idempotent: true });
     }
 
     // Update database record
@@ -438,10 +439,10 @@ export async function getDownloadsStorageSize(): Promise<number> {
     let totalSize = 0;
 
     for (const dir of dirs) {
-      const dirInfo = await FileSystem.readDirectoryAsync(dir);
+      const dirInfo = await readDirectoryAsync(dir);
       for (const file of dirInfo) {
         const filePath = `${dir}${file}`;
-        const fileInfo = await FileSystem.getInfoAsync(filePath);
+        const fileInfo = await getInfoAsync(filePath);
         if (fileInfo.exists && fileInfo.size) {
           totalSize += fileInfo.size;
         }

@@ -1,0 +1,325 @@
+import { useEffect, useRef, useState, useCallback } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  FlatList,
+  TouchableOpacity,
+  StatusBar,
+  ActivityIndicator,
+  ScrollView,
+} from 'react-native';
+import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { supabase } from '@/lib/supabase/client';
+import { SPACING, BORDER_RADIUS, COLORS, FONT_SIZE } from '@/constants/theme';
+import { useTheme } from '@/lib/theme/ThemeContext';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import SearchBar from '@/components/SearchBar';
+
+interface SearchResult {
+  book_id: string;
+  book_title: string;
+  book_author: string;
+  book_cover_url: string | null;
+  chapter_id: string;
+  chapter_title: string;
+  snippet: string;
+}
+
+export default function GlobalSearchScreen() {
+  const router = useRouter();
+  const { colors, isDark } = useTheme();
+  const insets = useSafeAreaInsets();
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<SearchResult[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
+
+  const performSearch = useCallback(async (searchQuery: string) => {
+    const trimmed = searchQuery.trim();
+    if (!trimmed || trimmed.length < 2) {
+      setResults([]);
+      setHasSearched(false);
+      return;
+    }
+
+    setIsSearching(true);
+    setHasSearched(true);
+
+    try {
+      // Search across books and chapters using ILIKE
+      const { data, error } = await supabase
+        .from('book_chapters')
+        .select(`
+          id,
+          title,
+          content,
+          books (
+            id,
+            title,
+            author,
+            cover_url
+          )
+        `)
+        .ilike('content', `%${trimmed}%`)
+        .or(`books.title.ilike.%${trimmed}%,books.author.ilike.%${trimmed}%,title.ilike.%${trimmed}%`)
+        .limit(50);
+
+      if (!error && data) {
+        const searchResults: SearchResult[] = [];
+        const lowerQuery = trimmed.toLowerCase();
+
+        for (const item of data) {
+          const book = item.books && Array.isArray(item.books) ? item.books[0] : item.books;
+          const content = item.content || '';
+          const lowerContent = content.toLowerCase();
+          
+          // Find the match position and extract snippet
+          const matchIndex = lowerContent.indexOf(lowerQuery);
+          let snippet = '';
+          
+          if (matchIndex !== -1) {
+            const snippetStart = Math.max(0, matchIndex - 50);
+            const snippetEnd = Math.min(content.length, matchIndex + trimmed.length + 50);
+            snippet = content.substring(snippetStart, snippetEnd);
+            
+            // Highlight the match
+            const lowerSnippet = snippet.toLowerCase();
+            const posInSnippet = lowerSnippet.indexOf(lowerQuery);
+            if (posInSnippet !== -1) {
+              const before = snippet.substring(0, posInSnippet);
+              const match = snippet.substring(posInSnippet, posInSnippet + trimmed.length);
+              const after = snippet.substring(posInSnippet + trimmed.length);
+              snippet = `${before}**${match}**${after}`;
+            }
+          }
+
+          searchResults.push({
+            book_id: book?.id || '',
+            book_title: book?.title || '',
+            book_author: book?.author || '',
+            book_cover_url: book?.cover_url || null,
+            chapter_id: item.id,
+            chapter_title: item.title,
+            snippet,
+          });
+        }
+
+        setResults(searchResults);
+      }
+    } catch (err) {
+      console.error('Global search error:', err);
+    } finally {
+      setIsSearching(false);
+    }
+  }, []);
+
+  // Debounced auto-search: triggers when query changes
+  useEffect(() => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    
+    const trimmed = query.trim();
+    if (!trimmed || trimmed.length < 2) {
+      setResults([]);
+      setHasSearched(false);
+      return;
+    }
+
+    debounceTimerRef.current = setTimeout(() => {
+      performSearch(query);
+    }, 400);
+
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, [query, performSearch]);
+
+  const handleResultPress = (bookId: string) => {
+    router.push(`/book/${bookId}/reader`);
+  };
+
+  const renderResult = ({ item, index }: { item: SearchResult; index: number }) => (
+    <TouchableOpacity
+      style={[styles.resultItem, { borderBottomColor: colors.border }]}
+      onPress={() => handleResultPress(item.book_id)}
+    >
+      <View style={styles.resultHeader}>
+        <Ionicons name="book" size={20} color={COLORS.royalPurple} />
+        <Text style={[styles.bookTitle, { color: colors.text }]} numberOfLines={1}>
+          {item.book_title}
+        </Text>
+        <Text style={[styles.authorText, { color: colors.textSecondary }]} numberOfLines={1}>
+          {item.book_author}
+        </Text>
+      </View>
+      <View style={styles.chapterInfo}>
+        <Ionicons name="document-text" size={16} color={colors.textMuted} />
+        <Text style={[styles.chapterTitle, { color: colors.textSecondary }]} numberOfLines={1}>
+          {item.chapter_title}
+        </Text>
+      </View>
+      <Text style={[styles.snippet, { color: colors.textMuted }]}>
+        {item.snippet.replace(/\*\*/g, '')}
+      </Text>
+    </TouchableOpacity>
+  );
+
+  return (
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['left', 'right']}>
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
+      
+      {/* Header */}
+      <View style={[styles.header, { paddingTop: insets.top + SPACING.sm, backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
+        </TouchableOpacity>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Search All Books</Text>
+        <View style={{ width: 24 }} />
+      </View>
+
+      {/* Search Bar */}
+      <View style={[styles.searchContainer, { backgroundColor: colors.surface }]}>
+        <SearchBar
+          value={query}
+          onChangeText={setQuery}
+          onSearch={() => performSearch(query)}
+          placeholder="Search titles, authors, content..."
+        />
+      </View>
+
+      {/* Results */}
+      {isSearching ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={COLORS.royalPurple} />
+          <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
+            Searching...
+          </Text>
+        </View>
+      ) : hasSearched && results.length > 0 ? (
+        <FlatList
+          data={results}
+          renderItem={renderResult}
+          keyExtractor={(item, index) => `${item.chapter_id}-${index}`}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+        />
+      ) : hasSearched && results.length === 0 ? (
+        <View style={styles.emptyState}>
+          <Ionicons name="search" size={64} color={colors.textMuted} />
+          <Text style={[styles.emptyTitle, { color: colors.textSecondary }]}>
+            No results found
+          </Text>
+          <Text style={[styles.emptySubtitle, { color: colors.textMuted }]}>
+            Try a different search term
+          </Text>
+        </View>
+      ) : (
+        <View style={styles.emptyState}>
+          <Ionicons name="search" size={64} color={colors.textMuted} />
+          <Text style={[styles.emptyTitle, { color: colors.textSecondary }]}>
+            Search your library
+          </Text>
+          <Text style={[styles.emptySubtitle, { color: colors.textMuted }]}>
+            Find books by title, author, or content
+          </Text>
+        </View>
+      )}
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    borderBottomWidth: 1,
+  },
+  backButton: {
+    padding: SPACING.xs,
+  },
+  headerTitle: {
+    flex: 1,
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  searchContainer: {
+    padding: SPACING.md,
+  },
+  listContent: {
+    padding: SPACING.md,
+  },
+  resultItem: {
+    paddingVertical: SPACING.md,
+    borderBottomWidth: 1,
+  },
+  resultHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: SPACING.xs,
+  },
+  bookTitle: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: '600',
+    marginLeft: SPACING.xs,
+    flex: 1,
+  },
+  authorText: {
+    fontSize: FONT_SIZE.sm,
+    marginLeft: SPACING.sm,
+  },
+  chapterInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: SPACING.xs,
+  },
+  chapterTitle: {
+    fontSize: FONT_SIZE.sm,
+    marginLeft: SPACING.xs,
+    flex: 1,
+  },
+  snippet: {
+    fontSize: FONT_SIZE.sm,
+    lineHeight: 20,
+    marginLeft: 24,
+  },
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingText: {
+    fontSize: FONT_SIZE.md,
+    marginTop: SPACING.md,
+  },
+  emptyState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: SPACING.xl,
+  },
+  emptyTitle: {
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '600',
+    marginTop: SPACING.md,
+    textAlign: 'center',
+  },
+  emptySubtitle: {
+    fontSize: FONT_SIZE.md,
+    marginTop: SPACING.xs,
+    textAlign: 'center',
+  },
+});

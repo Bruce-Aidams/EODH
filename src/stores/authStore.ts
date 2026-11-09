@@ -1,10 +1,10 @@
 import { create } from 'zustand';
 import { User, UserPreferences, ReadingSettings } from '@/types';
-import { supabase } from '@/lib/supabase/client';
-import { THEME } from '@/constants/theme';
+import { supabase, isSupabaseConfigured } from '@/lib/supabase/client';
 
 interface AuthState {
   user: User | null;
+  profile: User | null;
   session: any;
   isLoading: boolean;
   isAuthenticated: boolean;
@@ -19,16 +19,27 @@ interface AuthState {
 
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
+  profile: null,
   session: null,
   isLoading: true,
   isAuthenticated: false,
   isAdmin: false,
 
   checkAuth: async () => {
+    // If Supabase is not configured, skip auth check entirely
+    if (!isSupabaseConfigured()) {
+      set({ user: null, profile: null, session: null, isAuthenticated: false, isAdmin: false, isLoading: false });
+      return;
+    }
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      // Add a timeout to prevent hanging if Supabase is unreachable
+      const timeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Auth check timeout')), 5000)
+      );
+      const sessionResult = await Promise.race([supabase.auth.getSession(), timeout]);
+      const { data: { session } } = sessionResult as any;
       if (!session) {
-        set({ user: null, session: null, isAuthenticated: false, isAdmin: false, isLoading: false });
+        set({ user: null, profile: null, session: null, isAuthenticated: false, isAdmin: false, isLoading: false });
         return;
       }
       const { data: profile } = await supabase
@@ -36,17 +47,19 @@ export const useAuthStore = create<AuthState>((set) => ({
         .select('*')
         .eq('id', session.user.id)
         .single();
-      
+
       const role = profile?.role || 'reader';
       set({
         user: profile || null,
+        profile: profile || null,
         session,
         isAuthenticated: true,
         isAdmin: role === 'admin',
         isLoading: false,
       });
     } catch {
-      set({ user: null, session: null, isAuthenticated: false, isAdmin: false, isLoading: false });
+      // On any error (timeout, network, etc.), treat as unauthenticated
+      set({ user: null, profile: null, session: null, isAuthenticated: false, isAdmin: false, isLoading: false });
     }
   },
 
@@ -67,6 +80,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       
       set({
         user: profile || null,
+        profile: profile || null,
         session,
         isAuthenticated: true,
         isAdmin: profile?.role === 'admin',
@@ -99,6 +113,7 @@ export const useAuthStore = create<AuthState>((set) => ({
         
         set({
           user: profile || null,
+          profile: profile || null,
           session,
           isAuthenticated: true,
           isAdmin: profile?.role === 'admin',
@@ -115,7 +130,7 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   signOut: async () => {
     await supabase.auth.signOut();
-    set({ user: null, session: null, isAuthenticated: false, isAdmin: false });
+    set({ user: null, profile: null, session: null, isAuthenticated: false, isAdmin: false });
   },
 
   resetPassword: async (email: string) => {

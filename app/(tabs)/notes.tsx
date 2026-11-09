@@ -1,25 +1,29 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  SafeAreaView,
   StatusBar,
   ActivityIndicator,
   Alert,
   Modal,
   TextInput,
+  RefreshControl,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useLibraryStore } from '@/stores/libraryStore';
 import { Bookmark, Highlight, Note } from '@/types';
-import { COLORS, SPACING, BORDER_RADIUS } from '@/constants/theme';
+import { SPACING, BORDER_RADIUS, COLORS, FONT_SIZE, SHADOWS, GRADIENTS, toGradientCSS } from '@/constants/theme';
 import { supabase } from '@/lib/supabase/client';
 import { useNetworkStatus } from '@/lib/network/useNetworkStatus';
 import { useToast } from '@/lib/notifications/toast';
+import { useTheme } from '@/lib/theme/ThemeContext';
+import { AnimatedView } from '@/components/AnimatedView';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 type NoteType = 'bookmark' | 'highlight' | 'note';
 
@@ -40,6 +44,8 @@ export default function NotesScreen() {
   const router = useRouter();
   const { isOffline } = useNetworkStatus();
   const { showInfo } = useToast();
+  const { colors, isDark } = useTheme();
+  const insets = useSafeAreaInsets();
   const [allNotes, setAllNotes] = useState<UnifiedNote[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [filter, setFilter] = useState<NoteType | 'all'>('all');
@@ -47,9 +53,16 @@ export default function NotesScreen() {
   const [showAddNote, setShowAddNote] = useState(false);
   const [newNoteText, setNewNoteText] = useState('');
   const [cachedNotes, setCachedNotes] = useState<UnifiedNote[]>([]);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   useEffect(() => {
     fetchAllNotes();
+  }, []);
+
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    await fetchAllNotes();
+    setIsRefreshing(false);
   }, []);
 
   // Show offline indicator when network is lost
@@ -81,20 +94,15 @@ export default function NotesScreen() {
 
       const notes: UnifiedNote[] = [];
 
-      // Fetch bookmarks
+      // Fetch bookmarks with book details in a single query (fixes N+1)
       const { data: bookmarks } = await supabase
         .from('bookmarks')
-        .select('*')
+        .select('*, books(title, author)')
         .eq('user_id', user.id)
         .order('created_at', { ascending: false });
 
       for (const bm of bookmarks || []) {
-        const { data: book } = await supabase
-          .from('books')
-          .select('title, author')
-          .eq('id', bm.book_id)
-          .single();
-
+        const book = (bm as any).books;
         if (book) {
           notes.push({
             id: bm.id,
@@ -110,20 +118,15 @@ export default function NotesScreen() {
         }
       }
 
-      // Fetch highlights
+      // Fetch highlights with book details in a single query (fixes N+1)
       const { data: highlights } = await supabase
         .from('highlights')
-        .select('*')
+        .select('*, books(title, author)')
         .eq('user_id', user.id)
         .order('created_at', { ascending: false });
 
       for (const hl of highlights || []) {
-        const { data: book } = await supabase
-          .from('books')
-          .select('title, author')
-          .eq('id', hl.book_id)
-          .single();
-
+        const book = (hl as any).books;
         if (book) {
           notes.push({
             id: hl.id,
@@ -139,20 +142,15 @@ export default function NotesScreen() {
         }
       }
 
-      // Fetch notes
+      // Fetch notes with book details in a single query (fixes N+1)
       const { data: userNotes } = await supabase
         .from('notes')
-        .select('*')
+        .select('*, books(title, author)')
         .eq('user_id', user.id)
         .order('created_at', { ascending: false });
 
       for (const n of userNotes || []) {
-        const { data: book } = await supabase
-          .from('books')
-          .select('title, author')
-          .eq('id', n.book_id)
-          .single();
-
+        const book = (n as any).books;
         if (book) {
           notes.push({
             id: n.id,
@@ -258,9 +256,9 @@ export default function NotesScreen() {
 
   const getNoteColor = (type: NoteType) => {
     switch (type) {
-      case 'bookmark': return COLORS.gold;
-      case 'highlight': return COLORS.violet;
-      case 'note': return COLORS.royalPurple;
+      case 'bookmark': return colors.primary;
+      case 'highlight': return colors.primary;
+      case 'note': return colors.primary;
     }
   };
 
@@ -276,69 +274,98 @@ export default function NotesScreen() {
     note: allNotes.filter(n => n.type === 'note').length,
   };
 
+  const gradientColors = isDark ? GRADIENTS.dark : GRADIENTS.primary;
+
+
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" />
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['left', 'right']}>
+      <StatusBar barStyle="light-content" />
       
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Notes</Text>
-        <TouchableOpacity style={styles.addButton} onPress={() => setShowAddNote(true)}>
-          <Ionicons name="add-circle" size={28} color={COLORS.royalPurple} />
-        </TouchableOpacity>
-      </View>
+      {/* Gradient Header */}
+      <AnimatedView fadeDelay={50} fadeDuration={400} slideDirection="down" slideDistance={20}>
+        <View style={[styles.gradientHeader, { backgroundImage: toGradientCSS(gradientColors), paddingTop: insets.top + SPACING.md }]}>
+            <View style={styles.headerContent}>
+              <View style={{flex: 1}}>
+                <Text style={styles.headerTitle} numberOfLines={1}>Bookmarks & Notes</Text>
+                <Text style={styles.headerSubtitle}>{counts.all} items saved</Text>
+              </View>
+              <TouchableOpacity style={styles.addButton} onPress={() => setShowAddNote(true)} activeOpacity={0.7}>
+                <Ionicons name="add-circle" size={32} color={COLORS.gold} />
+              </TouchableOpacity>
+            </View>
+          </View>
+      </AnimatedView>
 
       {/* Search Bar */}
-      <View style={styles.searchContainer}>
-        <View style={styles.searchBar}>
-          <Ionicons name="search" size={18} color={COLORS.gray400} />
+      <AnimatedView fadeDelay={150} fadeDuration={400} slideDirection="up" slideDistance={15} style={styles.searchContainer}>
+        <View style={[styles.searchBar, { backgroundColor: colors.surface }, isDark && { backgroundColor: '#1a1f3a' }]}>
+          <Ionicons name="search" size={18} color={colors.textMuted} />
           <TextInput
-            style={styles.searchInput}
+            style={[styles.searchInput, { color: colors.text }]}
             placeholder="Search notes..."
-            placeholderTextColor={COLORS.gray400}
+            placeholderTextColor={colors.textMuted}
             value={searchQuery}
             onChangeText={setSearchQuery}
           />
           {searchQuery ? (
             <TouchableOpacity onPress={() => setSearchQuery('')}>
-              <Ionicons name="close-circle" size={18} color={COLORS.gray400} />
+              <Ionicons name="close-circle" size={18} color={colors.textMuted} />
             </TouchableOpacity>
           ) : null}
         </View>
-      </View>
+      </AnimatedView>
 
-      {/* Filter Tabs */}
-      <View style={styles.filterContainer}>
+      {/* Filter Chips */}
+      <AnimatedView fadeDelay={250} fadeDuration={400} slideDirection="up" slideDistance={15}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterContainer} contentContainerStyle={styles.filterContent}>
         {(['all', 'bookmark', 'highlight', 'note'] as const).map((f) => (
           <TouchableOpacity
             key={f}
-            style={[styles.filterTab, filter === f && styles.filterTabActive]}
+            style={[
+              styles.filterChip,
+              { backgroundColor: colors.surface },
+              filter === f && { backgroundColor: colors.primary }
+            ]}
             onPress={() => setFilter(f)}
+            activeOpacity={0.7}
           >
-            <Text style={[styles.filterText, filter === f && styles.filterTextActive]}>
-              {f === 'all' ? 'All' : f.charAt(0).toUpperCase() + f.slice(1)}
-            </Text>
-            <View style={[styles.countBadge, filter === f && styles.countBadgeActive]}>
-              <Text style={[styles.countText, filter === f && styles.countTextActive]}>
-                {counts[f]}
-              </Text>
-            </View>
+            {filter === f && (
+              <View style={[styles.filterChipGradient, { backgroundImage: toGradientCSS([colors.primary, colors.accent], 'horizontal') }]}>
+                <Text style={styles.filterChipTextActive}>
+                  {f === 'all' ? 'All' : f.charAt(0).toUpperCase() + f.slice(1)}
+                </Text>
+                <View style={styles.countBadgeActive}>
+                  <Text style={styles.countTextActive}>{counts[f]}</Text>
+                </View>
+              </View>
+            )}
+            {filter !== f && (
+              <>
+                <Text style={[styles.filterChipText, { color: colors.textSecondary }]}>
+                  {f === 'all' ? 'All' : f.charAt(0).toUpperCase() + f.slice(1)}
+                </Text>
+                <View style={[styles.countBadge, { backgroundColor: colors.surfaceVariant }]}>
+                  <Text style={[styles.countText, { color: colors.textSecondary }]}>{counts[f]}</Text>
+                </View>
+              </>
+            )}
           </TouchableOpacity>
         ))}
-      </View>
+        </ScrollView>
+      </AnimatedView>
 
       {isLoading ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={COLORS.royalPurple} />
-          <Text style={styles.loadingText}>Loading notes...</Text>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Loading notes...</Text>
         </View>
       ) : filteredNotes.length === 0 ? (
         <View style={styles.emptyState}>
-          <Ionicons name="document-text-outline" size={64} color={COLORS.gray300} />
-          <Text style={styles.emptyTitle}>
+          <Ionicons name="document-text-outline" size={64} color={colors.textMuted} />
+          <Text style={[styles.emptyTitle, { color: colors.textSecondary }]}>
             {searchQuery ? 'No Results Found' : 'No Notes Yet'}
           </Text>
-          <Text style={styles.emptySubtitle}>
+          <Text style={[styles.emptySubtitle, { color: colors.textMuted }]}>
             {searchQuery 
               ? 'Try a different search term.'
               : 'Highlight text or add notes while reading to see them here.'
@@ -346,32 +373,45 @@ export default function NotesScreen() {
           </Text>
         </View>
       ) : (
-        <ScrollView style={styles.content}>
-          {filteredNotes.map((note) => (
-            <View key={note.id} style={styles.noteCard}>
+        <ScrollView
+          style={styles.content}
+          contentContainerStyle={{ paddingBottom: insets.bottom + SPACING.xxl + 20 }}
+          refreshControl={
+            <RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} tintColor={colors.primary} />
+          }
+        >
+          {filteredNotes.map((note, index) => (
+            <AnimatedView
+              key={note.id}
+              fadeDelay={300 + index * 60}
+              fadeDuration={350}
+              slideDirection="up"
+              slideDistance={20}
+              pressScale={0.97}
+              onPress={() => router.push(`/book/${note.book_id}`)}
+              style={[styles.noteCard, { backgroundColor: colors.card, shadowColor: colors.cardShadow, borderRadius: BORDER_RADIUS.lg }]}
+            >
               <View style={[styles.noteAccent, { backgroundColor: getNoteColor(note.type) }]}>
-                <Ionicons name={getNoteIcon(note.type)} size={16} color={COLORS.white} />
+                <Ionicons name={getNoteIcon(note.type)} size={16} color="#FFFFFF" />
               </View>
-              <TouchableOpacity
-                style={styles.noteContent}
-                onPress={() => router.push(`/book/${note.book_id}`)}
-              >
-                <Text style={styles.noteBookTitle} numberOfLines={1}>{note.book_title}</Text>
-                <Text style={styles.noteContentText} numberOfLines={3}>{note.content}</Text>
+              <View style={styles.noteContent}>
+                <Text style={[styles.noteBookTitle, { color: colors.primary }]} numberOfLines={1}>{note.book_title}</Text>
+                <Text style={[styles.noteContentText, { color: colors.text }]} numberOfLines={3}>{note.content}</Text>
                 <View style={styles.noteMeta}>
-                  <Text style={styles.noteDate}>{formatDate(note.created_at)}</Text>
+                  <Text style={[styles.noteDate, { color: colors.textMuted }]}>{formatDate(note.created_at)}</Text>
                   {note.page_number && (
-                    <Text style={styles.notePage}>Page {note.page_number}</Text>
+                    <Text style={[styles.notePage, { color: colors.textMuted }]}>Page {note.page_number}</Text>
                   )}
                 </View>
-              </TouchableOpacity>
+              </View>
               <TouchableOpacity
                 style={styles.deleteButton}
                 onPress={() => handleDeleteNote(note)}
+                activeOpacity={0.7}
               >
-                <Ionicons name="trash-outline" size={18} color={COLORS.gray400} />
+                <Ionicons name="trash-outline" size={18} color={colors.textMuted} />
               </TouchableOpacity>
-            </View>
+            </AnimatedView>
           ))}
         </ScrollView>
       )}
@@ -384,29 +424,29 @@ export default function NotesScreen() {
         onRequestClose={() => setShowAddNote(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+          <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Add Note</Text>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>Add Note</Text>
               <TouchableOpacity onPress={() => setShowAddNote(false)}>
-                <Ionicons name="close" size={24} color={COLORS.gray600} />
+                <Ionicons name="close" size={24} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
             <TextInput
-              style={styles.noteInput}
+              style={[styles.noteInput, { backgroundColor: colors.background, color: colors.text }]}
               placeholder="Write your note..."
-              placeholderTextColor={COLORS.gray400}
+              placeholderTextColor={colors.textMuted}
               value={newNoteText}
               onChangeText={setNewNoteText}
               multiline
               textAlignVertical="top"
             />
             <TouchableOpacity
-              style={[styles.saveButton, !newNoteText.trim() && styles.saveButtonDisabled]}
+              style={[styles.saveButton, { backgroundColor: colors.primary }, !newNoteText.trim() && { backgroundColor: colors.textMuted }]}
               disabled={!newNoteText.trim()}
               onPress={handleAddNote}
             >
-              <Ionicons name="checkmark" size={20} color={COLORS.white} />
-              <Text style={styles.saveButtonText}>Save Note</Text>
+              <Ionicons name="checkmark" size={20} color="#FFFFFF" />
+              <Text style={[styles.saveButtonText, { color: '#FFFFFF' }]}>Save Note</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -418,70 +458,90 @@ export default function NotesScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.lightBackground,
   },
-  header: {
+  gradientHeader: {
+    overflow: 'hidden',
+    paddingHorizontal: SPACING.md,
+    paddingBottom: SPACING.lg,
+  },
+  gradientOverlay: {
+    paddingHorizontal: SPACING.md,
+    paddingTop: SPACING.md,
+    paddingBottom: SPACING.lg,
+  },
+  headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.md,
+    gap: SPACING.md,
   },
   headerTitle: {
     fontSize: 28,
-    fontWeight: 'bold',
-    color: COLORS.deepNavy,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    flexShrink: 1,
+  },
+  headerSubtitle: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.7)',
+    marginTop: 2,
   },
   addButton: {
     padding: SPACING.xs,
   },
   searchContainer: {
     paddingHorizontal: SPACING.md,
+    marginTop: SPACING.md,
     paddingBottom: SPACING.sm,
   },
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.md,
+    borderRadius: BORDER_RADIUS.lg,
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.sm,
     gap: SPACING.sm,
+    ...SHADOWS.card,
   },
   searchInput: {
     flex: 1,
     fontSize: 14,
-    color: COLORS.deepNavy,
     paddingVertical: 0,
   },
   filterContainer: {
-    flexDirection: 'row',
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.sm,
-    gap: SPACING.xs,
   },
-  filterTab: {
+  filterContent: {
+    gap: SPACING.sm,
+  },
+  filterChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: 6,
-    borderRadius: 16,
-    backgroundColor: COLORS.white,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: 8,
+    borderRadius: 20,
+    gap: 6,
+    ...SHADOWS.card,
+  },
+  filterChipGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: SPACING.md,
+    paddingVertical: 8,
+    borderRadius: 20,
     gap: 6,
   },
-  filterTabActive: {
-    backgroundColor: COLORS.royalPurple,
-  },
-  filterText: {
-    fontSize: 12,
+  filterChipText: {
+    fontSize: 13,
     fontWeight: '600',
-    color: COLORS.gray600,
   },
-  filterTextActive: {
-    color: COLORS.white,
+  filterChipTextActive: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
   countBadge: {
-    backgroundColor: COLORS.gray200,
     paddingHorizontal: 6,
     paddingVertical: 1,
     borderRadius: 8,
@@ -489,15 +549,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   countBadgeActive: {
-    backgroundColor: COLORS.white + '40',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 8,
+    minWidth: 18,
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.3)',
   },
   countText: {
     fontSize: 10,
     fontWeight: '600',
-    color: COLORS.gray600,
   },
   countTextActive: {
-    color: COLORS.white,
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
   content: {
     flex: 1,
@@ -511,7 +577,6 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: SPACING.md,
     fontSize: 14,
-    color: COLORS.gray500,
   },
   emptyState: {
     flex: 1,
@@ -522,25 +587,20 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: COLORS.gray600,
     marginTop: SPACING.md,
   },
   emptySubtitle: {
     fontSize: 14,
-    color: COLORS.gray400,
     textAlign: 'center',
     marginTop: SPACING.sm,
   },
   noteCard: {
     flexDirection: 'row',
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.md,
-    marginBottom: SPACING.sm,
-    shadowColor: COLORS.deepNavy,
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
+    marginBottom: SPACING.md,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
     overflow: 'hidden',
   },
   noteAccent: {
@@ -557,12 +617,10 @@ const styles = StyleSheet.create({
   noteBookTitle: {
     fontSize: 12,
     fontWeight: '600',
-    color: COLORS.royalPurple,
     marginBottom: 4,
   },
   noteContentText: {
     fontSize: 14,
-    color: COLORS.deepNavy,
     lineHeight: 20,
   },
   noteMeta: {
@@ -573,11 +631,9 @@ const styles = StyleSheet.create({
   },
   noteDate: {
     fontSize: 11,
-    color: COLORS.gray400,
   },
   notePage: {
     fontSize: 11,
-    color: COLORS.gray400,
   },
   deleteButton: {
     padding: SPACING.md,
@@ -589,7 +645,6 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalContent: {
-    backgroundColor: COLORS.white,
     borderTopLeftRadius: BORDER_RADIUS.lg,
     borderTopRightRadius: BORDER_RADIUS.lg,
     padding: SPACING.xl,
@@ -604,14 +659,11 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: COLORS.deepNavy,
   },
   noteInput: {
-    backgroundColor: COLORS.lightBackground,
     borderRadius: BORDER_RADIUS.sm,
     padding: SPACING.md,
     fontSize: 15,
-    color: COLORS.deepNavy,
     minHeight: 120,
     marginBottom: SPACING.md,
   },
@@ -619,18 +671,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: COLORS.royalPurple,
     paddingVertical: SPACING.md,
     borderRadius: BORDER_RADIUS.md,
     gap: SPACING.sm,
   },
   saveButtonDisabled: {
-    backgroundColor: COLORS.gray300,
     opacity: 0.5,
   },
   saveButtonText: {
     fontSize: 16,
     fontWeight: '600',
-    color: COLORS.white,
   },
 });

@@ -6,23 +6,27 @@ import {
   ScrollView,
   TouchableOpacity,
   Image,
-  SafeAreaView,
   StatusBar,
   ActivityIndicator,
 } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import Animated from 'react-native-reanimated';
 import { supabase } from '@/lib/supabase/client';
 import { useAudioStore } from '@/stores/audioStore';
 import { useLibraryStore } from '@/stores/libraryStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { Book, AudioSegment } from '@/types';
-import { COLORS, SPACING, BORDER_RADIUS } from '@/constants/theme';
+import { SPACING, BORDER_RADIUS, COLORS, FONT_SIZE, GRADIENTS, SHADOWS } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
+import { useTheme } from '@/lib/theme/ThemeContext';
 import { useCompleteAudioPlayer } from '@/lib/audio/player';
 import { useMediaControls } from '@/lib/audio/mediaControls';
 import { useAudioQueue } from '@/lib/audio/queue';
 import { getAudioSegmentUri } from '@/lib/offline/fileManager';
+import { AnimatedView } from '@/components/AnimatedView';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 /**
  * Audio Player Screen with real expo-audio playback.
@@ -34,6 +38,8 @@ import { getAudioSegmentUri } from '@/lib/offline/fileManager';
 export default function AudioPlayerScreen() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
+  const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const { updateListeningProgress } = useLibraryStore();
   const { audioSettings } = useSettingsStore();
   const {
@@ -143,7 +149,6 @@ export default function AudioPlayerScreen() {
         }
       },
     },
-    currentSegmentIndex // key dependency — changes cause re-mount with new segment
   );
 
   // Sync store state with real player state
@@ -210,7 +215,7 @@ export default function AudioPlayerScreen() {
           const uris: string[] = [];
           for (let i = 0; i < segData.length; i++) {
             const segment = segData[i];
-            const localUri = await getAudioSegmentUri(bookId, i + 1, segment.audio_url);
+            const localUri = await getAudioSegmentUri(bookId!, i + 1, segment.audio_url);
             uris.push(localUri || segment.audio_url || '');
           }
           setResolvedAudioUris(uris);
@@ -333,16 +338,16 @@ export default function AudioPlayerScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={COLORS.royalPurple} />
+      <SafeAreaView style={[styles.loadingContainer, { backgroundColor: colors.background }]} edges={['left', 'right']}>
+        <ActivityIndicator size="large" color={colors.primary} />
       </SafeAreaView>
     );
   }
 
   if (!book) {
     return (
-      <SafeAreaView style={styles.emptyContainer}>
-        <Ionicons name="headset-outline" size={64} color={COLORS.gray300} />
+      <SafeAreaView style={[styles.emptyContainer, { backgroundColor: colors.background }]} edges={['left', 'right']}>
+        <Ionicons name="headset-outline" size={64} color={colors.textMuted} />
         <Text style={styles.emptyTitle}>Audio Not Available</Text>
         <Text style={styles.emptySubtitle}>This book does not have audio content.</Text>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
@@ -355,46 +360,50 @@ export default function AudioPlayerScreen() {
   const activeSegment = bookSegments[currentSegmentIndex] || null;
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['left', 'right']}>
       <StatusBar barStyle="light-content" />
 
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + SPACING.md }]}>
         <TouchableOpacity onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color={COLORS.white} />
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>Audio Player</Text>
         <View style={{ width: 24 }} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + SPACING.xxl + 20 }]} showsVerticalScrollIndicator={false}>
         {/* Book Cover */}
-        <View style={styles.coverContainer}>
-          {book.cover_url ? (
-            <Image source={{ uri: book.cover_url }} style={styles.coverImage} />
-          ) : (
-            <View style={styles.coverPlaceholder}>
-              <View style={styles.coverGradient} />
-              <Ionicons name="musical-notes" size={64} color={COLORS.white} />
-            </View>
-          )}
-        </View>
+        <AnimatedView fadeDelay={100} fadeDuration={400} slideDirection="up" slideDistance={20}>
+          <View style={styles.coverContainer}>
+            {book.cover_url ? (
+              <Image source={{ uri: book.cover_url }} style={styles.coverImage} />
+            ) : (
+              <View style={styles.coverPlaceholder}>
+                <View style={styles.coverGradient} />
+                <Ionicons name="musical-notes" size={64} color="#FFFFFF" />
+              </View>
+            )}
+          </View>
+        </AnimatedView>
 
         {/* Book Info */}
-        <View style={styles.infoSection}>
-          <Text style={styles.title} numberOfLines={2}>{book.title}</Text>
-          <Text style={styles.author} numberOfLines={1}>{book.author}</Text>
+        <AnimatedView fadeDelay={200} fadeDuration={400} slideDirection="up" slideDistance={15}>
+          <View style={styles.infoSection}>
+            <Text style={styles.title} numberOfLines={2}>{book.title}</Text>
+            <Text style={styles.author} numberOfLines={1}>{book.author}</Text>
 
-          {activeSegment && (
-            <View style={styles.segmentInfo}>
-              <Text style={styles.segmentLabel}>Chapter {currentSegmentIndex + 1} of {bookSegments.length}</Text>
-              <Text style={styles.segmentText} numberOfLines={2}>
-                {activeSegment.text.substring(0, 100)}
-                {activeSegment.text.length > 100 ? '...' : ''}
-              </Text>
-            </View>
-          )}
-        </View>
+            {activeSegment && (
+              <View style={styles.segmentInfo}>
+                <Text style={styles.segmentLabel}>Chapter {currentSegmentIndex + 1} of {bookSegments.length}</Text>
+                <Text style={styles.segmentText} numberOfLines={2}>
+                  {activeSegment.text.substring(0, 100)}
+                  {activeSegment.text.length > 100 ? '...' : ''}
+                </Text>
+              </View>
+            )}
+          </View>
+        </AnimatedView>
 
         {/* Progress */}
         <View style={styles.progressSection}>
@@ -403,9 +412,9 @@ export default function AudioPlayerScreen() {
             value={globalTime}
             minimumValue={0}
             maximumValue={displayDuration || 1}
-            minimumTrackTintColor={COLORS.gold}
-            maximumTrackTintColor={COLORS.gray600}
-            thumbTintColor={COLORS.gold}
+            minimumTrackTintColor={colors.primary}
+            maximumTrackTintColor={colors.border}
+            thumbTintColor={colors.primary}
             onValueChange={handleSeek}
           />
           <View style={styles.timeRow}>
@@ -415,14 +424,15 @@ export default function AudioPlayerScreen() {
         </View>
 
         {/* Playback Controls */}
-        <View style={styles.controlsSection}>
+        <AnimatedView fadeDelay={300} fadeDuration={400} slideDirection="up" slideDistance={15}>
+          <View style={styles.controlsSection}>
           <View style={styles.controlsRow}>
             <TouchableOpacity onPress={handleShuffle} style={[styles.utilityButton, isShuffled && styles.utilityButtonActive]}>
-              <Ionicons name="shuffle-outline" size={24} color={isShuffled ? COLORS.gold : COLORS.white} />
+              <Ionicons name="shuffle-outline" size={24} color={isShuffled ? colors.primary : colors.text} />
             </TouchableOpacity>
 
             <TouchableOpacity onPress={handleSkipBackward}>
-              <Ionicons name="play-skip-back" size={32} color={COLORS.white} />
+              <Ionicons name="play-skip-back" size={32} color={colors.text} />
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -433,22 +443,22 @@ export default function AudioPlayerScreen() {
               <Ionicons
                 name={isPlaying ? 'pause-circle' : 'play-circle'}
                 size={64}
-                color={bookSegments.length === 0 ? COLORS.gray500 : COLORS.white}
+                color={bookSegments.length === 0 ? colors.textMuted : colors.text}
               />
             </TouchableOpacity>
 
             <TouchableOpacity onPress={handleSkipForward}>
-              <Ionicons name="play-skip-forward" size={32} color={COLORS.white} />
+              <Ionicons name="play-skip-forward" size={32} color={colors.text} />
             </TouchableOpacity>
 
             <TouchableOpacity onPress={handleRepeat} style={[styles.utilityButton, (repeatMode !== 'none') && styles.utilityButtonActive]}>
               {repeatMode === 'one' ? (
                 <View style={styles.repeatOneContainer}>
-                  <Ionicons name="repeat" size={24} color={COLORS.gold} />
+                  <Ionicons name="repeat" size={24} color={colors.primary} />
                   <Text style={styles.repeatOneText}>1</Text>
                 </View>
               ) : (
-                <Ionicons name="repeat-outline" size={24} color={repeatMode === 'all' ? COLORS.gold : COLORS.white} />
+                <Ionicons name="repeat-outline" size={24} color={repeatMode === 'all' ? colors.primary : colors.text} />
               )}
             </TouchableOpacity>
           </View>
@@ -460,22 +470,24 @@ export default function AudioPlayerScreen() {
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.sleepButton}>
-              <Ionicons name="time-outline" size={24} color={COLORS.white} />
+              <Ionicons name="time-outline" size={24} color={colors.text} />
             </TouchableOpacity>
           </View>
         </View>
+        </AnimatedView>
 
         {/* Buffer Status */}
         {isBuffering && (
           <View style={styles.bufferContainer}>
-            <ActivityIndicator size="small" color={COLORS.gold} />
+            <ActivityIndicator size="small" color={colors.primary} />
             <Text style={styles.bufferText}>Buffering...</Text>
           </View>
         )}
 
         {/* Chapter List */}
         {bookSegments.length > 0 && (
-          <View style={styles.chaptersSection}>
+          <AnimatedView fadeDelay={400} fadeDuration={400} slideDirection="up" slideDistance={15}>
+            <View style={styles.chaptersSection}>
             <Text style={styles.sectionTitle}>Chapters</Text>
             {bookSegments.map((segment, index) => (
               <TouchableOpacity
@@ -516,17 +528,18 @@ export default function AudioPlayerScreen() {
                   </Text>
                 </View>
                 {index === currentSegmentIndex && isPlaying && (
-                  <Ionicons name="volume-high" size={16} color={COLORS.gold} />
+                  <Ionicons name="volume-high" size={16} color={colors.primary} />
                 )}
               </TouchableOpacity>
             ))}
           </View>
+          </AnimatedView>
         )}
 
         {/* No Audio Message */}
         {bookSegments.length === 0 && (
           <View style={styles.noAudioContainer}>
-            <Ionicons name="volume-mute-outline" size={48} color={COLORS.gray400} />
+            <Ionicons name="volume-mute-outline" size={48} color={colors.textMuted} />
             <Text style={styles.noAudioTitle}>No Audio Segments</Text>
             <Text style={styles.noAudioSubtitle}>
               Audio content will be available when the administrator uploads audiobook files.
@@ -541,17 +554,14 @@ export default function AudioPlayerScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.deepNavy,
   },
   loadingContainer: {
     flex: 1,
-    backgroundColor: COLORS.deepNavy,
     alignItems: 'center',
     justifyContent: 'center',
   },
   emptyContainer: {
     flex: 1,
-    backgroundColor: COLORS.lightBackground,
     alignItems: 'center',
     justifyContent: 'center',
     padding: SPACING.xl,
@@ -559,12 +569,10 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: COLORS.gray600,
     marginTop: SPACING.md,
   },
   emptySubtitle: {
     fontSize: 14,
-    color: COLORS.gray400,
     textAlign: 'center',
     marginTop: SPACING.sm,
   },
@@ -572,11 +580,9 @@ const styles = StyleSheet.create({
     marginTop: SPACING.lg,
     paddingHorizontal: SPACING.lg,
     paddingVertical: SPACING.md,
-    backgroundColor: COLORS.royalPurple,
     borderRadius: BORDER_RADIUS.md,
   },
   backButtonText: {
-    color: COLORS.white,
     fontSize: 15,
     fontWeight: '600',
   },
@@ -591,7 +597,6 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 16,
     fontWeight: '600',
-    color: COLORS.white,
     textAlign: 'center',
   },
   scrollContent: {
@@ -600,49 +605,44 @@ const styles = StyleSheet.create({
   coverContainer: {
     alignItems: 'center',
     marginBottom: SPACING.lg,
+    width: '80%',
+    maxWidth: 220,
   },
   coverImage: {
-    width: 200,
-    height: 200,
-    borderRadius: BORDER_RADIUS.lg,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.3,
-    shadowRadius: 16,
-    elevation: 8,
+    width: '100%',
+    maxWidth: 220,
+    aspectRatio: 1,
+    borderRadius: BORDER_RADIUS.xl,
+    ...SHADOWS.cardHeavy,
   },
   coverPlaceholder: {
-    width: 200,
-    height: 200,
-    borderRadius: BORDER_RADIUS.lg,
+    width: '100%',
+    maxWidth: 220,
+    aspectRatio: 1,
+    borderRadius: BORDER_RADIUS.xl,
     overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.3,
-    shadowRadius: 16,
-    elevation: 8,
+    ...SHADOWS.cardHeavy,
   },
   coverGradient: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: COLORS.royalPurple,
+    ...StyleSheet.absoluteFill,
   },
   infoSection: {
     alignItems: 'center',
     marginBottom: SPACING.lg,
   },
   title: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: COLORS.white,
+    fontSize: FONT_SIZE.xxl,
+    fontWeight: '800',
     textAlign: 'center',
     marginBottom: SPACING.xs,
+    flexShrink: 1,
   },
   author: {
-    fontSize: 15,
-    color: COLORS.gray400,
+    fontSize: FONT_SIZE.md,
     textAlign: 'center',
+    flexShrink: 1,
   },
   segmentInfo: {
     marginTop: SPACING.md,
@@ -650,7 +650,6 @@ const styles = StyleSheet.create({
   },
   segmentLabel: {
     fontSize: 11,
-    color: COLORS.gold,
     textTransform: 'uppercase',
     letterSpacing: 1,
     marginBottom: 4,
@@ -658,7 +657,6 @@ const styles = StyleSheet.create({
   },
   segmentText: {
     fontSize: 13,
-    color: COLORS.gray300,
     textAlign: 'center',
     lineHeight: 18,
   },
@@ -676,7 +674,6 @@ const styles = StyleSheet.create({
   },
   timeText: {
     fontSize: 12,
-    color: COLORS.gray400,
   },
   controlsSection: {
     marginBottom: SPACING.lg,
@@ -701,7 +698,6 @@ const styles = StyleSheet.create({
   speedText: {
     fontSize: 12,
     fontWeight: '600',
-    color: COLORS.white,
   },
   sleepButton: {
     paddingHorizontal: SPACING.sm,
@@ -727,7 +723,6 @@ const styles = StyleSheet.create({
     right: -2,
     fontSize: 10,
     fontWeight: 'bold',
-    color: COLORS.gold,
   },
   secondaryControlsRow: {
     flexDirection: 'row',
@@ -745,7 +740,6 @@ const styles = StyleSheet.create({
   },
   bufferText: {
     fontSize: 13,
-    color: COLORS.gray400,
   },
   chaptersSection: {
     marginTop: SPACING.md,
@@ -753,7 +747,6 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: COLORS.white,
     marginBottom: SPACING.md,
   },
   chapterItem: {
@@ -778,26 +771,22 @@ const styles = StyleSheet.create({
   },
   chapterNumberText: {
     fontSize: 13,
-    color: COLORS.gray400,
     fontWeight: '500',
   },
   chapterNumberTextActive: {
-    color: COLORS.gold,
   },
   chapterInfo: {
     flex: 1,
+    minWidth: 0,
   },
   chapterTitle: {
     fontSize: 14,
-    color: COLORS.gray300,
   },
   chapterTitleActive: {
-    color: COLORS.gold,
     fontWeight: '500',
   },
   chapterDuration: {
     fontSize: 11,
-    color: COLORS.gray500,
     marginTop: 2,
   },
   noAudioContainer: {
@@ -807,12 +796,10 @@ const styles = StyleSheet.create({
   noAudioTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: COLORS.gray400,
     marginTop: SPACING.md,
   },
   noAudioSubtitle: {
     fontSize: 13,
-    color: COLORS.gray500,
     textAlign: 'center',
     marginTop: SPACING.sm,
     paddingHorizontal: SPACING.lg,

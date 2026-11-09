@@ -5,7 +5,6 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  SafeAreaView,
   StatusBar,
   Modal,
   Alert,
@@ -15,23 +14,28 @@ import { Ionicons } from '@expo/vector-icons';
 import Slider from '@react-native-community/slider';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { COLORS, SPACING, BORDER_RADIUS } from '@/constants/theme';
+import { useTheme } from '@/lib/theme/ThemeContext';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const FONT_SIZES = [12, 14, 16, 18, 20, 22, 24, 26, 28, 32];
 const LINE_SPACINGS = [1.0, 1.2, 1.4, 1.5, 1.6, 1.8, 2.0];
 const THEMES = [
   { key: 'light' as const, label: 'Light', icon: 'sunny' as const, bg: '#FFFFFF' },
   { key: 'dark' as const, label: 'Dark', icon: 'moon' as const, bg: '#1a1a2e' },
-  { key: 'sepia' as const, label: 'Sepia', icon: 'document-text' as const, bg: '#F6F0E0' },
+  { key: 'system' as const, label: 'System', icon: 'desktop' as const, bg: '#6B7280' },
 ];
 const TEXT_ALIGNMENTS = [
-  { key: 'left' as const, label: 'Left', icon: 'align-horizontal-left' as const },
-  { key: 'center' as const, label: 'Center', icon: 'align-horizontal-center' as const },
-  { key: 'justify' as const, label: 'Justify', icon: 'text-wrapping' as const },
+  { key: 'left' as const, label: 'Left', icon: 'apps' as const },
+  { key: 'center' as const, label: 'Center', icon: 'grid' as const },
+  { key: 'justify' as const, label: 'Justify', icon: 'list' as const },
 ];
 
 export default function ReadingSettingsScreen() {
   const router = useRouter();
   const { readingSettings, setReadingSettings, resetSettings } = useSettingsStore();
+  const { colors, isDark } = useTheme();
+  const insets = useSafeAreaInsets();
   const [showPreview, setShowPreview] = useState(false);
 
   const handleReset = () => {
@@ -50,24 +54,24 @@ export default function ReadingSettingsScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" />
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['left', 'right']}>
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
       
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + SPACING.md, backgroundColor: colors.surface }]}>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color={COLORS.deepNavy} />
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Reading Settings</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Reading Settings</Text>
         <TouchableOpacity style={styles.previewButton} onPress={() => setShowPreview(true)}>
           <Ionicons name="eye" size={20} color={COLORS.royalPurple} />
         </TouchableOpacity>
       </View>
 
-      <ScrollView style={styles.content}>
+      <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: insets.bottom + SPACING.xxl + 20 }}>
         {/* Theme Selection */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Theme</Text>
+        <View style={[styles.section, { backgroundColor: colors.surface }]}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Theme</Text>
           <View style={styles.themeRow}>
             {THEMES.map((theme) => (
               <TouchableOpacity
@@ -80,11 +84,11 @@ export default function ReadingSettingsScreen() {
                 onPress={() => setReadingSettings({ theme: theme.key, backgroundColor: theme.bg })}
               >
                 <View style={[styles.themeCircle, { backgroundColor: theme.bg }]}>
-                  <Ionicons name={theme.icon} size={18} color={theme.bg === '#FFFFFF' ? COLORS.deepNavy : (theme.bg === '#1a1a2e' ? COLORS.white : COLORS.deepNavy)} />
+                  <Ionicons name={theme.icon} size={18} color={theme.bg === '#FFFFFF' ? COLORS.deepNavy : (theme.bg === '#6B7280' ? COLORS.white : COLORS.white)} />
                 </View>
                 <Text style={[
                   styles.themeLabel,
-                  theme.bg === '#1a1a2e' && { color: COLORS.white },
+                  (theme.bg === '#1a1a2e' || theme.bg === '#6B7280') && { color: COLORS.white },
                   readingSettings.theme === theme.key && styles.themeLabelActive,
                 ]}>
                   {theme.label}
@@ -95,8 +99,8 @@ export default function ReadingSettingsScreen() {
         </View>
 
         {/* Font Size */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Font Size</Text>
+        <View style={[styles.section, { backgroundColor: colors.surface }]}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Font Size</Text>
           <View style={styles.sliderContainer}>
             <Ionicons name="text" size={16} color={COLORS.gray400} />
             <Slider
@@ -119,8 +123,8 @@ export default function ReadingSettingsScreen() {
         </View>
 
         {/* Line Spacing */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Line Spacing</Text>
+        <View style={[styles.section, { backgroundColor: colors.surface }]}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Line Spacing</Text>
           <View style={styles.sliderContainer}>
             <Ionicons name="resize" size={16} color={COLORS.gray400} />
             <Slider
@@ -143,8 +147,8 @@ export default function ReadingSettingsScreen() {
         </View>
 
         {/* Text Alignment */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Text Alignment</Text>
+        <View style={[styles.section, { backgroundColor: colors.surface }]}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Text Alignment</Text>
           <View style={styles.alignmentRow}>
             {TEXT_ALIGNMENTS.map((align) => (
               <TouchableOpacity
@@ -172,8 +176,8 @@ export default function ReadingSettingsScreen() {
         </View>
 
         {/* Margins */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Margins</Text>
+        <View style={[styles.section, { backgroundColor: colors.surface }]}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Margins</Text>
           <View style={styles.sliderContainer}>
             <Text style={styles.sliderLabel}>8px</Text>
             <Slider
@@ -226,7 +230,7 @@ export default function ReadingSettingsScreen() {
                     fontSize: readingSettings.fontSize,
                     lineHeight: readingSettings.fontSize * readingSettings.lineSpacing,
                     textAlign: readingSettings.textAlign,
-                    color: readingSettings.theme === 'dark' ? COLORS.white : (readingSettings.theme === 'sepia' ? '#5B4636' : COLORS.deepNavy),
+                    color: readingSettings.theme === 'dark' ? COLORS.white : (readingSettings.theme === 'system' ? colors.text : COLORS.deepNavy),
                   },
                 ]}
               >
@@ -243,14 +247,12 @@ export default function ReadingSettingsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.lightBackground,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.md,
-    backgroundColor: COLORS.white,
+    paddingBottom: SPACING.md,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.gray200,
   },
@@ -273,7 +275,6 @@ const styles = StyleSheet.create({
     padding: SPACING.md,
   },
   section: {
-    backgroundColor: COLORS.white,
     borderRadius: BORDER_RADIUS.md,
     padding: SPACING.md,
     marginBottom: SPACING.md,
@@ -286,7 +287,6 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 15,
     fontWeight: '700',
-    color: COLORS.deepNavy,
     marginBottom: SPACING.md,
   },
   themeRow: {

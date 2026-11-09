@@ -5,7 +5,6 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  SafeAreaView,
   StatusBar,
   Alert,
   ActivityIndicator,
@@ -14,11 +13,14 @@ import {
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
+import { getInfoAsync, readAsStringAsync, writeAsStringAsync, EncodingType } from 'expo-file-system/legacy';
 import { useAuthStore } from '@/stores/authStore';
-import { COLORS, SPACING, BORDER_RADIUS } from '@/constants/theme';
+import { SPACING, BORDER_RADIUS } from '@/constants/theme';
+import { useTheme } from '@/lib/theme/ThemeContext';
 import { supabase } from '@/lib/supabase/client';
-import { syncEngine } from '@/lib/sync/engine';
+import { syncEngine, SyncEngine } from '@/lib/sync/engine';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 interface AudioChapter {
   id: string;
@@ -42,6 +44,8 @@ interface AudioBook {
 
 export default function AdminAudioScreen() {
   const router = useRouter();
+  const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const { isAdmin } = useAuthStore();
   const [audioBooks, setAudioBooks] = useState<AudioBook[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -79,7 +83,7 @@ export default function AdminAudioScreen() {
 
       const books: AudioBook[] = [];
       for (const ab of audioBooksData || []) {
-        const bookInfo = ab.books;
+        const bookInfo = (ab.books as any[])?.[0] || ab.books;
         if (!bookInfo) continue;
 
         // Fetch chapters for this audiobook
@@ -149,8 +153,8 @@ export default function AdminAudioScreen() {
       const fileName = `audiobooks/${selectedBook.id}/${Date.now()}-${selectedFileName}`;
 
       // Upload file to Supabase Storage
-      const fileInfo = await FileSystem.getInfoAsync(fileUri);
-      const fileBase64 = await FileSystem.readAsStringAsync(fileUri, { encoding: FileSystem.EncodingType.Base64 });
+      const fileInfo = await getInfoAsync(fileUri);
+      const fileBase64 = await readAsStringAsync(fileUri, { encoding: EncodingType.Base64 });
 
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from('audiobooks')
@@ -170,7 +174,7 @@ export default function AdminAudioScreen() {
       const nextOrder = selectedBook.chapters.length;
       const { error: insertError } = await supabase.from('audio_segments').insert({
         audio_book_id: selectedBook.id,
-        chapter_id: `chapter-${nextOrder + 1}`,
+        chapter_id: null,
         title: chapterTitle.trim(),
         audio_file_url: publicUrl,
         order_index: nextOrder,
@@ -256,15 +260,15 @@ export default function AdminAudioScreen() {
 
     try {
       // Read the transcript file content
-      const content = await FileSystem.readAsStringAsync(transcriptFileUri);
+      const content = await readAsStringAsync(transcriptFileUri);
       const fileName = transcriptFileName.toLowerCase();
 
       // Parse the transcript into alignments
       let alignments;
       if (fileName.endsWith('.srt')) {
-        alignments = syncEngine.parseSRT(content, transcriptChapterId);
+        alignments = SyncEngine.parseSRT(content, transcriptChapterId);
       } else if (fileName.endsWith('.vtt')) {
-        alignments = syncEngine.parseWebVTT(content, transcriptChapterId);
+        alignments = SyncEngine.parseWebVTT(content, transcriptChapterId);
       } else {
         throw new Error('Unsupported file format');
       }
@@ -276,8 +280,8 @@ export default function AdminAudioScreen() {
       }
 
       // Upload the file to Supabase Storage
-      const fileBase64 = await FileSystem.readAsStringAsync(transcriptFileUri, {
-        encoding: FileSystem.EncodingType.Base64,
+      const fileBase64 = await readAsStringAsync(transcriptFileUri, {
+        encoding: EncodingType.Base64,
       });
       const storagePath = `transcripts/${transcriptChapterId}/${transcriptFileName}`;
 
@@ -330,25 +334,25 @@ export default function AdminAudioScreen() {
 
   if (isLoading) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['left', 'right']}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={COLORS.royalPurple} />
-          <Text style={styles.loadingText}>Loading audio library...</Text>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={[styles.loadingText, { color: colors.text }]}>Loading audio library...</Text>
         </View>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" />
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['left', 'right']}>
+      <StatusBar barStyle={colors.statusBar} />
       
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + SPACING.md, backgroundColor: colors.card, borderBottomColor: colors.border }]}>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color={COLORS.deepNavy} />
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Audio Management</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Audio Management</Text>
         <View style={styles.headerActions}>
           <TouchableOpacity
             style={styles.addButton}
@@ -361,7 +365,7 @@ export default function AdminAudioScreen() {
               }
             }}
           >
-            <Ionicons name="document-text" size={24} color={COLORS.violet} />
+            <Ionicons name="document-text" size={24} color={colors.primary} />
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.addButton}
@@ -374,23 +378,23 @@ export default function AdminAudioScreen() {
               }
             }}
           >
-            <Ionicons name="add-circle" size={28} color={COLORS.royalPurple} />
+            <Ionicons name="add-circle" size={28} color={colors.primary} />
           </TouchableOpacity>
         </View>
       </View>
 
-      <ScrollView style={styles.content}>
+      <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: insets.bottom + SPACING.xxl + 20 }}>
         {audioBooks.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Ionicons name="headset-outline" size={64} color={COLORS.gray300} />
-            <Text style={styles.emptyTitle}>No Audiobooks Yet</Text>
-            <Text style={styles.emptySubtitle}>
+          <View style={[styles.emptyState, { backgroundColor: colors.card }]}>
+            <Ionicons name="headset-outline" size={64} color={colors.textMuted} />
+            <Text style={[styles.emptyTitle, { color: colors.text }]}>No Audiobooks Yet</Text>
+            <Text style={[styles.emptySubtitle, { color: colors.textMuted }]}>
               Upload a book first, then add audio chapters here.
             </Text>
           </View>
         ) : (
           audioBooks.map((book) => (
-            <View key={book.id} style={styles.bookCard}>
+            <View key={book.id} style={[styles.bookCard, { backgroundColor: colors.card, shadowColor: colors.cardShadow }]}>
               <TouchableOpacity
                 style={styles.bookHeader}
                 onPress={() => {
@@ -398,20 +402,20 @@ export default function AdminAudioScreen() {
                   setSelectedBook(collapsed ? null : book);
                 }}
               >
-                <View style={styles.bookIcon}>
-                  <Ionicons name="musical-notes" size={24} color={COLORS.white} />
+                <View style={[styles.bookIcon, { backgroundColor: colors.primary }]}>
+                  <Ionicons name="musical-notes" size={24} color="#FFFFFF" />
                 </View>
                 <View style={styles.bookInfo}>
-                  <Text style={styles.bookTitle} numberOfLines={1}>{book.title}</Text>
-                  <Text style={styles.bookAuthor} numberOfLines={1}>{book.author}</Text>
-                  <Text style={styles.chapterCount}>
+                  <Text style={[styles.bookTitle, { color: colors.text }]} numberOfLines={1}>{book.title}</Text>
+                  <Text style={[styles.bookAuthor, { color: colors.textSecondary }]} numberOfLines={1}>{book.author}</Text>
+                  <Text style={[styles.chapterCount, { color: colors.primary }]}>
                     {book.chapters.length} chapter{book.chapters.length !== 1 ? 's' : ''}
                   </Text>
                 </View>
                 <Ionicons
                   name={selectedBook?.id === book.id ? 'chevron-up' : 'chevron-down'}
                   size={20}
-                  color={COLORS.gray400}
+                  color={colors.textMuted}
                 />
               </TouchableOpacity>
 
@@ -419,23 +423,23 @@ export default function AdminAudioScreen() {
                 <>
                   {/* Chapter List */}
                   {book.chapters.map((chapter) => (
-                    <View key={chapter.id} style={styles.chapterRow}>
+                    <View key={chapter.id} style={[styles.chapterRow, { borderTopColor: colors.border }]}>
                       <View style={styles.chapterInfo}>
-                        <Ionicons name="play-circle-outline" size={20} color={COLORS.royalPurple} />
+                        <Ionicons name="play-circle-outline" size={20} color={colors.primary} />
                         <View style={styles.chapterText}>
-                          <Text style={styles.chapterTitle}>{chapter.title}</Text>
+                          <Text style={[styles.chapterTitle, { color: colors.text }]}>{chapter.title}</Text>
                           <View style={styles.chapterMeta}>
-                            <Text style={styles.chapterDuration}>
+                            <Text style={[styles.chapterDuration, { color: colors.textMuted }]}>
                               {formatDuration(chapter.duration)}
                             </Text>
                             {chapter.has_transcript && (
-                              <View style={styles.badge}>
-                                <Text style={styles.badgeText}>SRT</Text>
+                              <View style={[styles.badge, { backgroundColor: colors.primary + '20' }]}>
+                                <Text style={[styles.badgeText, { color: colors.primary }]}>SRT</Text>
                               </View>
                             )}
                             {chapter.has_sync_file && (
-                              <View style={[styles.badge, styles.syncBadge]}>
-                                <Text style={styles.badgeText}>SYNC</Text>
+                              <View style={[styles.badge, styles.syncBadge, { backgroundColor: colors.primary + '30' }]}>
+                                <Text style={[styles.badgeText, { color: colors.primary }]}>SYNC</Text>
                               </View>
                             )}
                           </View>
@@ -445,21 +449,21 @@ export default function AdminAudioScreen() {
                         style={styles.deleteButton}
                         onPress={() => handleDeleteChapter(book.id, chapter.id)}
                       >
-                        <Ionicons name="trash-outline" size={18} color={COLORS.error} />
+                        <Ionicons name="trash-outline" size={18} color={colors.error} />
                       </TouchableOpacity>
                     </View>
                   ))}
 
                   {/* Add Chapter Button */}
                   <TouchableOpacity
-                    style={styles.addChapterButton}
+                    style={[styles.addChapterButton, { borderTopColor: colors.border }]}
                     onPress={() => {
                       setSelectedBook(book);
                       setShowUploadModal(true);
                     }}
                   >
-                    <Ionicons name="add-circle-outline" size={20} color={COLORS.royalPurple} />
-                    <Text style={styles.addChapterText}>Add Chapter</Text>
+                    <Ionicons name="add-circle-outline" size={20} color={colors.primary} />
+                    <Text style={[styles.addChapterText, { color: colors.primary }]}>Add Chapter</Text>
                   </TouchableOpacity>
                 </>
               )}
@@ -476,61 +480,61 @@ export default function AdminAudioScreen() {
         onRequestClose={() => setShowUploadModal(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+          <View style={[styles.modalContent, { backgroundColor: colors.card }]}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Upload Audio Chapter</Text>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>Upload Audio Chapter</Text>
               <TouchableOpacity onPress={() => setShowUploadModal(false)}>
-                <Ionicons name="close" size={24} color={COLORS.gray600} />
+                <Ionicons name="close" size={24} color={colors.text} />
               </TouchableOpacity>
             </View>
 
             {selectedBook && (
-              <Text style={styles.modalBookName}>
+              <Text style={[styles.modalBookName, { color: colors.textMuted }]}>
                 Book: {selectedBook.title}
               </Text>
             )}
 
             {/* Chapter Title Input */}
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Chapter Title</Text>
-              <View style={styles.inputContainer}>
-                <Ionicons name="pencil-outline" size={20} color={COLORS.gray400} />
+              <Text style={[styles.inputLabel, { color: colors.text }]}>Chapter Title</Text>
+              <View style={[styles.inputContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <Ionicons name="pencil-outline" size={20} color={colors.textMuted} />
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, { color: colors.text }]}
                   placeholder="Enter chapter title"
                   value={chapterTitle}
                   onChangeText={setChapterTitle}
-                  placeholderTextColor={COLORS.gray400}
+                  placeholderTextColor={colors.textMuted}
                 />
               </View>
             </View>
 
             {/* File Picker */}
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Audio File</Text>
-              <TouchableOpacity style={styles.filePicker} onPress={pickAudioFile}>
-                <Ionicons name="cloud-upload-outline" size={24} color={COLORS.royalPurple} />
+              <Text style={[styles.inputLabel, { color: colors.text }]}>Audio File</Text>
+              <TouchableOpacity style={[styles.filePicker, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={pickAudioFile}>
+                <Ionicons name="cloud-upload-outline" size={24} color={colors.primary} />
                 <View style={styles.filePickerText}>
-                  <Text style={styles.filePickerLabel}>
+                  <Text style={[styles.filePickerLabel, { color: colors.text }]}>
                     {selectedFileName || 'Select audio file'}
                   </Text>
-                  <Text style={styles.filePickerHint}>MP3, WAV, M4A, AAC, OGG</Text>
+                  <Text style={[styles.filePickerHint, { color: colors.textMuted }]}>MP3, WAV, M4A, AAC, OGG</Text>
                 </View>
               </TouchableOpacity>
             </View>
 
             {/* Upload Button */}
             <TouchableOpacity
-              style={[styles.uploadButton, (!selectedFileUri || !chapterTitle.trim()) && styles.uploadButtonDisabled]}
+              style={[styles.uploadButton, { backgroundColor: colors.primary }, (!selectedFileUri || !chapterTitle.trim()) && { backgroundColor: colors.textMuted }]}
               disabled={uploading || !selectedFileUri || !chapterTitle.trim()}
               onPress={handleUploadChapter}
             >
               {uploading ? (
-                <ActivityIndicator color={COLORS.white} />
+                <ActivityIndicator color="#FFFFFF" />
               ) : (
                 <>
-                  <Ionicons name="cloud-upload" size={20} color={COLORS.white} />
-                  <Text style={styles.uploadButtonText}>Upload Chapter</Text>
+                  <Ionicons name="cloud-upload" size={20} color="#FFFFFF" />
+                  <Text style={[styles.uploadButtonText, { color: '#FFFFFF' }]}>Upload Chapter</Text>
                 </>
               )}
             </TouchableOpacity>
@@ -546,24 +550,24 @@ export default function AdminAudioScreen() {
         onRequestClose={() => setShowTranscriptModal(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+          <View style={[styles.modalContent, { backgroundColor: colors.card }]}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Upload Transcript / Sync File</Text>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>Upload Transcript / Sync File</Text>
               <TouchableOpacity onPress={() => setShowTranscriptModal(false)}>
-                <Ionicons name="close" size={24} color={COLORS.gray600} />
+                <Ionicons name="close" size={24} color={colors.text} />
               </TouchableOpacity>
             </View>
 
-            <Text style={styles.modalDescription}>
+            <Text style={[styles.modalDescription, { color: colors.textMuted }]}>
               Upload an SRT or WebVTT file to enable synchronized reading for this audiobook.
               The transcript provides timing data that highlights text as audio plays.
             </Text>
 
             {/* Chapter Selection */}
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Select Chapter</Text>
-              <View style={styles.inputContainer}>
-                <Ionicons name="list-outline" size={20} color={COLORS.gray400} />
+              <Text style={[styles.inputLabel, { color: colors.text }]}>Select Chapter</Text>
+              <View style={[styles.inputContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <Ionicons name="list-outline" size={20} color={colors.textMuted} />
                 <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                   {audioBooks.map((book) =>
                     book.chapters.map((chapter) => (
@@ -571,7 +575,8 @@ export default function AdminAudioScreen() {
                         key={chapter.id}
                         style={[
                           styles.chip,
-                          transcriptChapterId === chapter.chapter_id && styles.chipActive,
+                          { backgroundColor: colors.surface, borderColor: colors.border },
+                          transcriptChapterId === chapter.chapter_id && { backgroundColor: colors.primary + '20', borderColor: colors.primary },
                         ]}
                         onPress={() => {
                           setSelectedBook(book);
@@ -581,7 +586,8 @@ export default function AdminAudioScreen() {
                         <Text
                           style={[
                             styles.chipText,
-                            transcriptChapterId === chapter.chapter_id && styles.chipTextActive,
+                            { color: colors.textSecondary },
+                            transcriptChapterId === chapter.chapter_id && { color: colors.primary, fontWeight: '600' },
                           ]}
                           numberOfLines={1}
                         >
@@ -596,14 +602,14 @@ export default function AdminAudioScreen() {
 
             {/* File Picker */}
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Transcript File (SRT / WebVTT)</Text>
-              <TouchableOpacity style={styles.filePicker} onPress={pickTranscriptFile}>
-                <Ionicons name="document-text-outline" size={24} color={COLORS.violet} />
+              <Text style={[styles.inputLabel, { color: colors.text }]}>Transcript File (SRT / WebVTT)</Text>
+              <TouchableOpacity style={[styles.filePicker, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={pickTranscriptFile}>
+                <Ionicons name="document-text-outline" size={24} color={colors.primary} />
                 <View style={styles.filePickerText}>
-                  <Text style={styles.filePickerLabel}>
+                  <Text style={[styles.filePickerLabel, { color: colors.text }]}>
                     {transcriptFileName || 'Select transcript file'}
                   </Text>
-                  <Text style={styles.filePickerHint}>SRT or WebVTT subtitle files</Text>
+                  <Text style={[styles.filePickerHint, { color: colors.textMuted }]}>SRT or WebVTT subtitle files</Text>
                 </View>
               </TouchableOpacity>
             </View>
@@ -612,17 +618,18 @@ export default function AdminAudioScreen() {
             <TouchableOpacity
               style={[
                 styles.uploadButton,
-                !transcriptFileUri || !transcriptChapterId ? styles.uploadButtonDisabled : null,
+                { backgroundColor: colors.primary },
+                !transcriptFileUri || !transcriptChapterId ? { backgroundColor: colors.textMuted } : null,
               ]}
               disabled={uploadingTranscript || !transcriptFileUri || !transcriptChapterId}
               onPress={handleUploadTranscript}
             >
               {uploadingTranscript ? (
-                <ActivityIndicator color={COLORS.white} />
+                <ActivityIndicator color="#FFFFFF" />
               ) : (
                 <>
-                  <Ionicons name="document" size={20} color={COLORS.white} />
-                  <Text style={styles.uploadButtonText}>Upload Transcript</Text>
+                  <Ionicons name="document" size={20} color="#FFFFFF" />
+                  <Text style={[styles.uploadButtonText, { color: '#FFFFFF' }]}>Upload Transcript</Text>
                 </>
               )}
             </TouchableOpacity>
@@ -638,16 +645,13 @@ import { TextInput } from 'react-native';
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.lightBackground,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.md,
-    backgroundColor: COLORS.white,
+    paddingBottom: SPACING.sm,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.gray200,
   },
   backButton: {
     padding: SPACING.xs,
@@ -656,7 +660,6 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 20,
     fontWeight: '700',
-    color: COLORS.deepNavy,
     textAlign: 'center',
   },
   headerActions: {
@@ -679,7 +682,6 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: SPACING.md,
     fontSize: 14,
-    color: COLORS.gray500,
   },
   emptyState: {
     flex: 1,
@@ -691,20 +693,16 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: COLORS.gray600,
     marginTop: SPACING.md,
   },
   emptySubtitle: {
     fontSize: 14,
-    color: COLORS.gray400,
     textAlign: 'center',
     marginTop: SPACING.sm,
   },
   bookCard: {
-    backgroundColor: COLORS.white,
     borderRadius: BORDER_RADIUS.md,
     marginBottom: SPACING.md,
-    shadowColor: COLORS.deepNavy,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 8,
@@ -720,7 +718,6 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: BORDER_RADIUS.sm,
-    backgroundColor: COLORS.royalPurple,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: SPACING.md,
@@ -731,16 +728,13 @@ const styles = StyleSheet.create({
   bookTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: COLORS.deepNavy,
   },
   bookAuthor: {
     fontSize: 13,
-    color: COLORS.gray500,
     marginTop: 2,
   },
   chapterCount: {
     fontSize: 12,
-    color: COLORS.royalPurple,
     marginTop: 2,
     fontWeight: '500',
   },
@@ -750,7 +744,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.sm,
     borderTopWidth: 1,
-    borderTopColor: COLORS.gray100,
   },
   chapterInfo: {
     flex: 1,
@@ -763,7 +756,6 @@ const styles = StyleSheet.create({
   },
   chapterTitle: {
     fontSize: 14,
-    color: COLORS.deepNavy,
     fontWeight: '500',
   },
   chapterMeta: {
@@ -774,21 +766,17 @@ const styles = StyleSheet.create({
   },
   chapterDuration: {
     fontSize: 12,
-    color: COLORS.gray400,
   },
   badge: {
-    backgroundColor: COLORS.violet + '20',
     paddingHorizontal: 6,
     paddingVertical: 1,
     borderRadius: 4,
   },
   syncBadge: {
-    backgroundColor: COLORS.gold + '30',
   },
   badgeText: {
     fontSize: 10,
     fontWeight: '600',
-    color: COLORS.royalPurple,
   },
   deleteButton: {
     padding: SPACING.sm,
@@ -799,13 +787,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: SPACING.md,
     borderTopWidth: 1,
-    borderTopColor: COLORS.gray100,
     gap: SPACING.xs,
   },
   addChapterText: {
     fontSize: 14,
     fontWeight: '600',
-    color: COLORS.royalPurple,
   },
   modalOverlay: {
     flex: 1,
@@ -813,7 +799,6 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalContent: {
-    backgroundColor: COLORS.white,
     borderTopLeftRadius: BORDER_RADIUS.lg,
     borderTopRightRadius: BORDER_RADIUS.lg,
     padding: SPACING.xl,
@@ -829,40 +814,31 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: COLORS.deepNavy,
   },
   modalBookName: {
     fontSize: 14,
-    color: COLORS.gray500,
     marginBottom: SPACING.md,
     fontStyle: 'italic',
   },
   modalDescription: {
     fontSize: 13,
-    color: COLORS.gray500,
     marginBottom: SPACING.md,
     lineHeight: 18,
   },
   chip: {
-    backgroundColor: COLORS.lightBackground,
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.sm,
     borderRadius: BORDER_RADIUS.full,
     marginRight: SPACING.sm,
     borderWidth: 1,
-    borderColor: COLORS.gray200,
   },
   chipActive: {
-    backgroundColor: COLORS.royalPurple + '20',
-    borderColor: COLORS.royalPurple,
   },
   chipText: {
     fontSize: 13,
-    color: COLORS.gray600,
     fontWeight: '500',
   },
   chipTextActive: {
-    color: COLORS.royalPurple,
     fontWeight: '600',
   },
   inputGroup: {
@@ -871,65 +847,54 @@ const styles = StyleSheet.create({
   inputLabel: {
     fontSize: 13,
     fontWeight: '600',
-    color: COLORS.gray600,
     marginBottom: SPACING.xs,
   },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.lightBackground,
     borderRadius: BORDER_RADIUS.sm,
     paddingHorizontal: SPACING.md,
     borderWidth: 1,
-    borderColor: COLORS.gray200,
   },
   input: {
     flex: 1,
     paddingVertical: SPACING.md,
-    fontSize: 15,
-    color: COLORS.deepNavy,
+    fontSize: 16,
     marginLeft: SPACING.sm,
   },
   filePicker: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.lightBackground,
     borderRadius: BORDER_RADIUS.sm,
     padding: SPACING.md,
     borderWidth: 1,
-    borderColor: COLORS.gray200,
     gap: SPACING.md,
   },
   filePickerText: {
     flex: 1,
   },
   filePickerLabel: {
-    fontSize: 15,
-    color: selectedFileName => COLORS.deepNavy,
+    fontSize: 16,
     fontWeight: '500',
   },
   filePickerHint: {
     fontSize: 12,
-    color: COLORS.gray400,
     marginTop: 2,
   },
   uploadButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: COLORS.royalPurple,
     paddingVertical: SPACING.md,
     borderRadius: BORDER_RADIUS.md,
     gap: SPACING.sm,
     marginTop: SPACING.md,
   },
   uploadButtonDisabled: {
-    backgroundColor: COLORS.gray300,
     opacity: 0.5,
   },
   uploadButtonText: {
     fontSize: 16,
     fontWeight: '600',
-    color: COLORS.white,
   },
 });

@@ -5,19 +5,23 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  SafeAreaView,
   StatusBar,
   ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '@/stores/authStore';
 import { supabase } from '@/lib/supabase/client';
-import { COLORS, SPACING, BORDER_RADIUS } from '@/constants/theme';
+import { SPACING, BORDER_RADIUS } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
+import { useTheme } from '@/lib/theme/ThemeContext';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function AdminDashboard() {
   const router = useRouter();
   const { isAdmin } = useAuthStore();
+  const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
 
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
@@ -57,10 +61,11 @@ export default function AdminDashboard() {
         .select('*', { count: 'exact', head: true })
         .eq('document_type', 'markdown');
 
-      // Fetch audiobooks count (books with audio segments)
+      // Fetch audiobooks count (books with audio)
       const { count: audiobooks } = await supabase
-        .from('audio_segments')
-        .select('*', { count: 'exact', head: true });
+        .from('books')
+        .select('*', { count: 'exact', head: true })
+        .eq('has_audio', true);
 
       // Fetch total readers
       const { count: totalReaders } = await supabase
@@ -91,16 +96,17 @@ export default function AdminDashboard() {
   };
 
   const statsCards = [
-    { label: 'Total Books', value: stats.totalBooks.toString(), icon: 'book' as const, color: COLORS.royalPurple },
-    { label: 'PDF Docs', value: stats.pdfDocs.toString(), icon: 'document-text' as const, color: COLORS.violet },
-    { label: 'Markdown', value: stats.markdownDocs.toString(), icon: 'code-slash' as const, color: COLORS.gold },
-    { label: 'Audiobooks', value: stats.audiobooks.toString(), icon: 'headset' as const, color: COLORS.success },
-    { label: 'Readers', value: stats.totalReaders.toString(), icon: 'people' as const, color: COLORS.deepNavy },
-    { label: 'Recent Uploads', value: stats.recentUploads.toString(), icon: 'time' as const, color: COLORS.violet },
+    { label: 'Total Books', value: stats.totalBooks.toString(), icon: 'book' as const, color: colors.primary },
+    { label: 'PDF Docs', value: stats.pdfDocs.toString(), icon: 'document-text' as const, color: colors.primary },
+    { label: 'Markdown', value: stats.markdownDocs.toString(), icon: 'code-slash' as const, color: colors.primary },
+    { label: 'Audiobooks', value: stats.audiobooks.toString(), icon: 'headset' as const, color: colors.primary },
+    { label: 'Readers', value: stats.totalReaders.toString(), icon: 'people' as const, color: colors.primary },
+    { label: 'Recent Uploads', value: stats.recentUploads.toString(), icon: 'time' as const, color: colors.primary },
   ];
 
   const actions = [
     { label: 'Upload Books', description: 'Add PDF, Markdown, or audio files', icon: 'cloud-upload' as const, route: '/admin/upload' },
+    { label: 'Bulk Upload', description: 'Upload multiple books at once', icon: 'albums' as const, route: '/admin/upload/bulk' },
     { label: 'Manage Books', description: 'Edit, publish, or delete books', icon: 'list' as const, route: '/admin/books' },
     { label: 'Audio Management', description: 'Upload and organize audiobooks', icon: 'musical-notes' as const, route: '/admin/audio' },
     { label: 'Text Processing', description: 'Extract text and generate structure', icon: 'document' as const, route: '' },
@@ -108,58 +114,58 @@ export default function AdminDashboard() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={COLORS.royalPurple} />
+      <SafeAreaView style={[styles.loadingContainer, { backgroundColor: colors.background }]} edges={['left', 'right']}>
+        <ActivityIndicator size="large" color={colors.primary} />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" />
-      <View style={styles.header}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['left', 'right']}>
+      <StatusBar barStyle={colors.statusBar} />
+      <View style={[styles.header, { paddingTop: insets.top + SPACING.md }]}>
         <TouchableOpacity onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color={COLORS.deepNavy} />
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Admin Dashboard</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Admin Dashboard</Text>
         <TouchableOpacity onPress={fetchStats}>
-          <Ionicons name="refresh" size={22} color={COLORS.royalPurple} />
+          <Ionicons name="refresh" size={22} color={colors.primary} />
         </TouchableOpacity>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + SPACING.xxl + 20 }]}>
         {/* Stats */}
-        <Text style={styles.sectionTitle}>Overview</Text>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Overview</Text>
         <View style={styles.statsGrid}>
           {statsCards.map((stat) => (
-            <View key={stat.label} style={styles.statCard}>
+            <View key={stat.label} style={[styles.statCard, { backgroundColor: colors.card, shadowColor: colors.cardShadow }]}>
               <View style={[styles.statIcon, { backgroundColor: stat.color + '20' }]}>
                 <Ionicons name={stat.icon} size={24} color={stat.color} />
               </View>
-              <Text style={styles.statValue}>{stat.value}</Text>
-              <Text style={styles.statLabel}>{stat.label}</Text>
+              <Text style={[styles.statValue, { color: colors.text }]}>{stat.value}</Text>
+              <Text style={[styles.statLabel, { color: colors.textSecondary }]}>{stat.label}</Text>
             </View>
           ))}
         </View>
 
         {/* Actions */}
-        <Text style={styles.sectionTitle}>Actions</Text>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Actions</Text>
         {actions.map((action) => (
           <TouchableOpacity
             key={action.label}
-            style={styles.actionCard}
+            style={[styles.actionCard, { backgroundColor: colors.card, shadowColor: colors.cardShadow }]}
             onPress={() => {
               if (action.route) router.push(action.route as any);
             }}
           >
-            <View style={[styles.actionIcon, { backgroundColor: COLORS.royalPurple + '15' }]}>
-              <Ionicons name={action.icon} size={24} color={COLORS.royalPurple} />
+            <View style={[styles.actionIcon, { backgroundColor: colors.primary + '15' }]}>
+              <Ionicons name={action.icon} size={24} color={colors.primary} />
             </View>
             <View style={styles.actionInfo}>
-              <Text style={styles.actionLabel}>{action.label}</Text>
-              <Text style={styles.actionDescription}>{action.description}</Text>
+              <Text style={[styles.actionLabel, { color: colors.text }]}>{action.label}</Text>
+              <Text style={[styles.actionDescription, { color: colors.textSecondary }]}>{action.description}</Text>
             </View>
-            <Ionicons name="chevron-forward" size={16} color={COLORS.gray400} />
+            <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
           </TouchableOpacity>
         ))}
       </ScrollView>
@@ -170,11 +176,9 @@ export default function AdminDashboard() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.lightBackground,
   },
   loadingContainer: {
     flex: 1,
-    backgroundColor: COLORS.lightBackground,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -182,13 +186,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.md,
+    paddingBottom: SPACING.sm,
     gap: SPACING.md,
   },
   headerTitle: {
     fontSize: 20,
     fontWeight: '600',
-    color: COLORS.deepNavy,
   },
   content: {
     padding: SPACING.md,
@@ -202,11 +205,9 @@ const styles = StyleSheet.create({
   statCard: {
     flex: 1,
     minWidth: '45%',
-    backgroundColor: COLORS.white,
     borderRadius: BORDER_RADIUS.md,
     padding: SPACING.md,
     alignItems: 'center',
-    shadowColor: COLORS.deepNavy,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 8,
@@ -223,27 +224,22 @@ const styles = StyleSheet.create({
   statValue: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: COLORS.deepNavy,
   },
   statLabel: {
     fontSize: 12,
-    color: COLORS.gray500,
     marginTop: 2,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: COLORS.deepNavy,
     marginBottom: SPACING.md,
   },
   actionCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.white,
     borderRadius: BORDER_RADIUS.md,
     padding: SPACING.md,
     marginBottom: SPACING.sm,
-    shadowColor: COLORS.deepNavy,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 8,
@@ -263,11 +259,9 @@ const styles = StyleSheet.create({
   actionLabel: {
     fontSize: 15,
     fontWeight: '600',
-    color: COLORS.deepNavy,
   },
   actionDescription: {
     fontSize: 12,
-    color: COLORS.gray500,
     marginTop: 2,
   },
 });

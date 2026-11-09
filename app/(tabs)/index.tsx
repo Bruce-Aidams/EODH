@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,222 +6,233 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
-  SafeAreaView,
   StatusBar,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@/stores/authStore';
 import { useLibraryStore } from '@/stores/libraryStore';
 import { useNetworkStatus } from '@/lib/network/useNetworkStatus';
-import { COLORS, THEME, SPACING, BORDER_RADIUS } from '@/constants/theme';
-import { Ionicons } from '@expo/vector-icons';
+import { SPACING, BORDER_RADIUS, COLORS, FONT_SIZE, GRADIENTS, SHADOWS, toGradientCSS } from '@/constants/theme';
+import { useResponsiveDimensions } from '@/lib/responsive/useResponsiveDimensions';
 import LazyImage from '@/components/LazyImage';
+import { useTheme } from '@/lib/theme/ThemeContext';
+import Button from '@/components/Button';
+import EmptyState from '@/components/EmptyState';
+import { SectionHeader } from '@/components/SectionHeader';
+import { AnimatedView } from '@/components/AnimatedView';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function HomeScreen() {
   const router = useRouter();
   const { user, isAuthenticated, isLoading } = useAuthStore();
   const { books, featuredBooks, recentlyOpened, recentlyListened, fetchBooks, fetchFeaturedBooks, fetchRecentlyOpened, fetchRecentlyListened } = useLibraryStore();
   const { isOffline } = useNetworkStatus();
+  const { colors, isDark } = useTheme();
+  const dimensions = useResponsiveDimensions();
+  const insets = useSafeAreaInsets();
   const [ready, setReady] = useState(false);
 
+  // Set ready state when auth loads
   useEffect(() => {
-    if (isAuthenticated && !isLoading) {
-      fetchBooks();
-      fetchFeaturedBooks();
-      fetchRecentlyOpened();
-      fetchRecentlyListened();
-      setReady(true);
-    } else if (!isAuthenticated && !isLoading) {
+    if (!isLoading) {
       setReady(true);
     }
-  }, [isAuthenticated, isLoading]);
+  }, [isLoading]);
+
+  // Refetch data whenever the screen gains focus (e.g., after uploading a book)
+  useFocusEffect(
+    useCallback(() => {
+      if (!isLoading) {
+        Promise.all([
+          fetchBooks(),
+          fetchFeaturedBooks(),
+          fetchRecentlyOpened(),
+          fetchRecentlyListened()
+        ]);
+      }
+    }, [isLoading, fetchBooks, fetchFeaturedBooks, fetchRecentlyOpened, fetchRecentlyListened])
+  );
+
+  const greeting = useMemo(() => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Good morning';
+    if (hour < 17) return 'Good afternoon';
+    return 'Good evening';
+  }, []);
 
   if (isLoading || !ready) {
     return (
       <View style={styles.loadingContainer}>
         <StatusBar barStyle="light-content" />
-        <View style={styles.logoContainer}>
-          <Text style={styles.logoText}>EODH</Text>
-          <Text style={styles.tagline}>Read. Listen. Learn.</Text>
+        <View style={[styles.loadingGradient, { backgroundImage: toGradientCSS(GRADIENTS.primary) }]}>
+          <View style={styles.logoContainer}>
+            <Ionicons name="book" size={48} color={COLORS.gold} />
+            <Text style={styles.logoText}>EODH</Text>
+            <Text style={styles.tagline}>Read. Listen. Learn.</Text>
+          </View>
+          <ActivityIndicator size="large" color={COLORS.gold} style={styles.loader} />
         </View>
-        <ActivityIndicator size="large" color={COLORS.gold} style={styles.loader} />
       </View>
     );
   }
 
-  if (!isAuthenticated) {
-    return (
-      <SafeAreaView style={styles.authContainer}>
-        <StatusBar barStyle="light-content" />
-        <View style={styles.logoContainer}>
-          <Text style={styles.logoText}>EODH</Text>
-          <Text style={styles.tagline}>Read. Listen. Learn.</Text>
-          <Text style={styles.authSubtitle}>Sign in to access your digital library</Text>
-        </View>
-        <View style={styles.authButtons}>
-          <TouchableOpacity
-            style={styles.authButton}
-            onPress={() => router.push('/auth/sign-in')}
-          >
-            <Text style={styles.authButtonText}>Sign In</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.authButton, styles.authButtonSecondary]}
-            onPress={() => router.push('/auth/sign-up')}
-          >
-            <Text style={[styles.authButtonText, styles.authButtonTextSecondary]}>Create Account</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  const greeting = getGreeting();
-  const displayName = user?.display_name || user?.email?.split('@')[0] || 'Reader';
+  // Always show content; use "Guest" if not logged in
+  const displayName = isAuthenticated ? (user?.display_name || user?.email?.split('@')[0] || 'Reader') : 'Guest';
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" />
-      
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['left', 'right']}>
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
+
       {/* Offline Indicator */}
       {isOffline && (
-        <View style={styles.offlineBanner}>
-          <Ionicons name="wifi-off-outline" size={16} color={COLORS.white} />
+        <View style={[styles.offlineBanner, { backgroundColor: COLORS.error }]}>
+          <Ionicons name="wifi" size={16} color="#FFFFFF" />
           <Text style={styles.offlineBannerText}>You are offline — showing cached content</Text>
         </View>
       )}
-      
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-        {/* Header */}
+
+      {/* Gradient Header */}
+      <View style={[styles.gradientHeader, { backgroundImage: toGradientCSS(isDark ? GRADIENTS.dark : GRADIENTS.primary, 'diagonal'), paddingTop: insets.top + SPACING.md }]}>
         <View style={styles.header}>
-          <View>
-            <Text style={styles.greeting}>{greeting}, {displayName}</Text>
-            <Text style={styles.subtitle}>What would you like to read today?</Text>
+          <View style={styles.headerLeft}>
+            <Text style={styles.greeting} numberOfLines={1}>{greeting}, {displayName}</Text>
+            <Text style={styles.subtitle} numberOfLines={1}>What would you like to read today?</Text>
           </View>
-          <TouchableOpacity
-            style={styles.profileButton}
-            onPress={() => router.push('/(tabs)/more')}
-          >
-            <Ionicons name="person-circle" size={40} color={COLORS.royalPurple} />
-          </TouchableOpacity>
+          {isAuthenticated ? (
+            <TouchableOpacity
+              style={styles.profileButton}
+              onPress={() => router.push('/(tabs)/more')}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="person-circle-outline" size={40} color={COLORS.white} />
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={styles.signInButton}
+              onPress={() => router.push('/auth/sign-in')}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.signInButtonText}>Sign In</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
-        {/* Search Bar */}
+        {/* Modern Search Bar */}
         <TouchableOpacity
           style={styles.searchBar}
           onPress={() => router.push('/(tabs)/library')}
+          activeOpacity={0.8}
         >
-          <Ionicons name="search" size={20} color={COLORS.gray400} />
+          <Ionicons name="search" size={20} color="rgba(255,255,255,0.6)" />
           <Text style={styles.searchPlaceholder}>Search books, authors...</Text>
         </TouchableOpacity>
+      </View>
 
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + SPACING.xxl + 20 }]} keyboardShouldPersistTaps="handled">
         {/* Continue Reading */}
         {recentlyOpened.length > 0 && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Continue Reading</Text>
-              <TouchableOpacity onPress={() => router.push('/(tabs)/library')}>
-                <Text style={styles.seeAll}>See All</Text>
-              </TouchableOpacity>
-            </View>
+          <AnimatedView style={styles.section} fadeDelay={100} fadeDuration={400} slideDirection="up" slideDistance={20}>
+            <SectionHeader
+              title="Continue Reading"
+              onPressSeeAll={() => router.push('/(tabs)/library')}
+            />
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.horizontalScroll}
+              keyboardShouldPersistTaps="handled"
             >
               {recentlyOpened.map((book) => (
                 <BookCard key={book.id} book={book} />
               ))}
             </ScrollView>
-          </View>
+          </AnimatedView>
         )}
 
         {/* Continue Listening */}
         {recentlyListened.length > 0 && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Continue Listening</Text>
-              <TouchableOpacity onPress={() => router.push('/(tabs)/audio')}>
-                <Text style={styles.seeAll}>See All</Text>
-              </TouchableOpacity>
-            </View>
+          <AnimatedView style={styles.section} fadeDelay={200} fadeDuration={400} slideDirection="up" slideDistance={20}>
+            <SectionHeader
+              title="Continue Listening"
+              onPressSeeAll={() => router.push('/(tabs)/audio')}
+            />
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.horizontalScroll}
+              keyboardShouldPersistTaps="handled"
             >
               {recentlyListened.map((item) => (
                 <ListeningBookCard key={item.id} book={item} progress={item.listeningProgress} />
               ))}
             </ScrollView>
-          </View>
+          </AnimatedView>
         )}
 
         {/* Featured Books */}
         {featuredBooks.length > 0 && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Featured</Text>
-              <TouchableOpacity onPress={() => router.push('/(tabs)/library')}>
-                <Text style={styles.seeAll}>See All</Text>
-              </TouchableOpacity>
-            </View>
+          <AnimatedView style={styles.section} fadeDelay={300} fadeDuration={400} slideDirection="up" slideDistance={20}>
+            <SectionHeader
+              title="Featured"
+              onPressSeeAll={() => router.push('/(tabs)/library')}
+            />
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.horizontalScroll}
+              keyboardShouldPersistTaps="handled"
             >
               {featuredBooks.map((book) => (
                 <BookCard key={book.id} book={book} />
               ))}
             </ScrollView>
-          </View>
+          </AnimatedView>
         )}
 
         {/* New Additions */}
         {books.length > 0 && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>New Additions</Text>
-            </View>
+          <AnimatedView style={styles.section} fadeDelay={400} fadeDuration={400} slideDirection="up" slideDistance={20}>
+            <SectionHeader title="New Additions" showSeeAll={false} />
             <View style={styles.grid}>
               {books.slice(0, 6).map((book) => (
-                <BookCard key={book.id} book={book} compact />
+                <View key={book.id} style={styles.gridItem}>
+                  <BookCard book={book} compact />
+                </View>
               ))}
             </View>
-          </View>
+          </AnimatedView>
         )}
 
         {/* Empty State */}
         {books.length === 0 && recentlyOpened.length === 0 && featuredBooks.length === 0 && (
-          <View style={styles.emptyState}>
-            <Ionicons name="book-outline" size={64} color={COLORS.gray300} />
-            <Text style={styles.emptyTitle}>No Books Yet</Text>
-            <Text style={styles.emptySubtitle}>
-              Books will appear here when added by the administrator.
-            </Text>
-          </View>
+          <EmptyState icon="book-outline" title="No Books Yet" subtitle="Books will appear here when added by the administrator." />
         )}
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-function BookCard({ book, compact }: { book: any; compact?: boolean }) {
+const BookCard = React.memo(function BookCard({ book, compact }: { book: any; compact?: boolean }) {
   const router = useRouter();
-  const width = compact ? 140 : 160;
+  const { colors } = useTheme();
+  const dimensions = useResponsiveDimensions();
+  const width = compact ? dimensions.bookCardCompactWidth : dimensions.bookCardWidth;
+  const coverHeight = width * 1.4;
 
   return (
     <TouchableOpacity
       style={[styles.bookCard, { width }]}
       onPress={() => router.push(`/book/${book.id}`)}
+      activeOpacity={0.7}
     >
-      <View style={[styles.bookCover, { width, height: width * 1.4 }]}>
+      <View style={[styles.bookCover, { width, height: coverHeight }]}>
         <LazyImage
           uri={book.cover_url || undefined}
           width={width}
-          height={width * 1.4}
-          borderRadius={BORDER_RADIUS.md}
+          height={coverHeight}
+          borderRadius={BORDER_RADIUS.lg}
         />
         {book.has_audio && (
           <View style={styles.audioBadge}>
@@ -229,71 +240,63 @@ function BookCard({ book, compact }: { book: any; compact?: boolean }) {
           </View>
         )}
       </View>
-      <Text style={styles.bookTitle} numberOfLines={2}>{book.title}</Text>
-      <Text style={styles.bookAuthor} numberOfLines={1}>{book.author}</Text>
+      <Text style={[styles.bookTitle, { color: colors.text }]} numberOfLines={2}>{book.title}</Text>
+      <Text style={[styles.bookAuthor, { color: colors.textSecondary }]} numberOfLines={1}>{book.author}</Text>
     </TouchableOpacity>
   );
-}
+});
 
-function ListeningBookCard({ book, progress }: { book: any; progress: any }) {
+const ListeningBookCard = React.memo(function ListeningBookCard({ book, progress }: { book: any; progress: any }) {
   const router = useRouter();
-  const width = 160;
+  const { colors } = useTheme();
+  const dimensions = useResponsiveDimensions();
+  const width = dimensions.bookCardWidth;
+  const coverHeight = width * 1.4;
   const progressPercent = progress?.progress_percent || 0;
 
   return (
     <TouchableOpacity
       style={[styles.bookCard, { width }]}
       onPress={() => router.push(`/book/${book.id}/audio`)}
+      activeOpacity={0.7}
       accessibilityLabel={`Continue listening to ${book.title}`}
       accessibilityRole="button"
     >
-      <View style={[styles.bookCover, { width, height: width * 1.4 }]}>
+      <View style={[styles.bookCover, { width, height: coverHeight }]}>
         <LazyImage
           uri={book.cover_url || undefined}
           width={width}
-          height={width * 1.4}
-          borderRadius={BORDER_RADIUS.md}
+          height={coverHeight}
+          borderRadius={BORDER_RADIUS.lg}
         />
         <View style={styles.playOverlay}>
-          <Ionicons name="play-circle" size={48} color={COLORS.white} opacity={0.9} />
+          <Ionicons name="play-circle" size={48} color="#FFFFFF" />
         </View>
-        {book.has_audio && (
-          <View style={styles.audioBadge}>
-            <Ionicons name="headset" size={12} color={COLORS.white} />
-          </View>
-        )}
       </View>
-      <Text style={styles.bookTitle} numberOfLines={2}>{book.title}</Text>
-      <Text style={styles.bookAuthor} numberOfLines={1}>{book.author}</Text>
+      <Text style={[styles.bookTitle, { color: colors.text }]} numberOfLines={2}>{book.title}</Text>
+      <Text style={[styles.bookAuthor, { color: colors.textSecondary }]} numberOfLines={1}>{book.author}</Text>
       <View style={styles.progressContainer}>
-        <View style={styles.progressBar}>
+        <View style={[styles.progressBar, { backgroundColor: colors.surfaceVariant }]}>
           <View style={[styles.progressFill, { width: `${progressPercent}%` }]} />
         </View>
-        <Text style={styles.progressText}>{Math.round(progressPercent)}%</Text>
+        <Text style={[styles.progressText, { color: colors.textSecondary }]}>{Math.round(progressPercent)}%</Text>
       </View>
     </TouchableOpacity>
   );
-}
-
-function getGreeting(): string {
-  const hour = new Date().getHours();
-  if (hour < 12) return 'Good morning';
-  if (hour < 17) return 'Good afternoon';
-  return 'Good evening';
-}
+});
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.lightBackground,
   },
   scrollContent: {
-    padding: SPACING.md,
-    paddingBottom: SPACING.xxl,
+    // paddingBottom is set dynamically with safe-area inset
   },
   loadingContainer: {
     flex: 1,
-    backgroundColor: COLORS.deepNavy,
+  },
+  loadingGradient: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -302,56 +305,56 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.xl,
   },
   logoText: {
-    fontSize: 48,
-    fontWeight: 'bold',
-    color: COLORS.gold,
-    letterSpacing: 8,
+    fontSize: FONT_SIZE.xxxl,
+    fontWeight: '800',
+    letterSpacing: 4,
+    color: COLORS.white,
+    marginTop: SPACING.sm,
   },
   tagline: {
-    fontSize: 16,
-    color: COLORS.white,
-    letterSpacing: 4,
+    fontSize: FONT_SIZE.lg,
+    letterSpacing: 2,
+    color: 'rgba(255,255,255,0.7)',
     marginTop: SPACING.sm,
+    fontWeight: '300',
   },
   loader: {
     marginTop: SPACING.xl,
   },
   authContainer: {
     flex: 1,
-    backgroundColor: COLORS.deepNavy,
+  },
+  authGradient: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     padding: SPACING.xl,
   },
   authSubtitle: {
-    fontSize: 16,
-    color: COLORS.gray400,
+    fontSize: FONT_SIZE.md,
     marginTop: SPACING.md,
     textAlign: 'center',
+    color: 'rgba(255,255,255,0.6)',
   },
   authButtons: {
     width: '100%',
     gap: SPACING.md,
     marginTop: SPACING.xxl,
   },
-  authButton: {
-    backgroundColor: COLORS.royalPurple,
-    paddingVertical: SPACING.md,
-    borderRadius: BORDER_RADIUS.md,
-    alignItems: 'center',
+  gradientHeader: {
+    paddingHorizontal: SPACING.md,
+    paddingBottom: SPACING.lg,
   },
-  authButtonSecondary: {
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: COLORS.royalPurple,
+  signInButton: {
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    borderRadius: BORDER_RADIUS.full,
+    backgroundColor: 'rgba(255,255,255,0.2)',
   },
-  authButtonText: {
-    color: COLORS.white,
-    fontSize: 16,
+  signInButtonText: {
+    fontSize: FONT_SIZE.sm,
     fontWeight: '600',
-  },
-  authButtonTextSecondary: {
-    color: COLORS.royalPurple,
+    color: COLORS.white,
   },
   header: {
     flexDirection: 'row',
@@ -359,30 +362,31 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: SPACING.md,
   },
+  headerLeft: {
+    flex: 1,
+  },
   greeting: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: COLORS.deepNavy,
+    fontSize: FONT_SIZE.xxl,
+    fontWeight: '800',
+    color: COLORS.white,
   },
   subtitle: {
-    fontSize: 14,
-    color: COLORS.gray500,
+    fontSize: FONT_SIZE.md,
+    color: 'rgba(255,255,255,0.7)',
     marginTop: 2,
   },
   offlineBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#EF4444',
     paddingVertical: 6,
     paddingHorizontal: SPACING.md,
     gap: SPACING.xs,
-    marginBottom: SPACING.sm,
   },
   offlineBannerText: {
-    color: COLORS.white,
-    fontSize: 12,
+    fontSize: FONT_SIZE.sm,
     fontWeight: '500',
+    color: '#FFFFFF',
   },
   profileButton: {
     width: 44,
@@ -392,98 +396,60 @@ const styles = StyleSheet.create({
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.white,
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.md,
-    borderRadius: BORDER_RADIUS.md,
-    marginBottom: SPACING.lg,
-    shadowColor: COLORS.deepNavy,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
+    borderRadius: BORDER_RADIUS.xl,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
   },
   searchPlaceholder: {
     marginLeft: SPACING.sm,
-    color: COLORS.gray400,
-    fontSize: 14,
+    fontSize: FONT_SIZE.md,
+    color: 'rgba(255,255,255,0.6)',
   },
   section: {
     marginBottom: SPACING.lg,
   },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: SPACING.md,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: COLORS.deepNavy,
-  },
-  seeAll: {
-    fontSize: 14,
-    color: COLORS.royalPurple,
-    fontWeight: '500',
-  },
   horizontalScroll: {
-    paddingRight: SPACING.md,
+    paddingHorizontal: SPACING.md,
   },
   bookCard: {
     marginRight: SPACING.md,
+    maxWidth: '85%',
   },
   bookCover: {
-    borderRadius: BORDER_RADIUS.md,
+    borderRadius: BORDER_RADIUS.lg,
     overflow: 'hidden',
-    alignItems: 'center',
-    justifyContent: 'center',
     marginBottom: SPACING.sm,
-  },
-  coverGradient: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: COLORS.royalPurple,
-  },
-  coverImage: {
-    width: '100%',
-    height: '100%',
-    borderRadius: BORDER_RADIUS.md,
-  },
-  coverTitle: {
-    color: COLORS.white,
-    fontSize: 12,
-    fontWeight: '600',
-    textAlign: 'center',
-    paddingHorizontal: SPACING.sm,
-    position: 'absolute',
-    bottom: SPACING.sm,
+    ...SHADOWS.card,
   },
   audioBadge: {
     position: 'absolute',
     top: SPACING.sm,
     right: SPACING.sm,
-    backgroundColor: COLORS.gold,
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    backgroundColor: COLORS.royalPurple,
     flexDirection: 'row',
     alignItems: 'center',
   },
   bookTitle: {
-    fontSize: 13,
+    fontSize: FONT_SIZE.sm,
     fontWeight: '600',
-    color: COLORS.deepNavy,
     marginTop: 2,
+    lineHeight: 16,
   },
   bookAuthor: {
-    fontSize: 11,
-    color: COLORS.gray500,
+    fontSize: FONT_SIZE.xs,
+    marginTop: 2,
   },
   playOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(8, 11, 46, 0.4)',
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.3)',
   },
   progressContainer: {
     flexDirection: 'row',
@@ -493,41 +459,26 @@ const styles = StyleSheet.create({
   },
   progressBar: {
     flex: 1,
-    height: 3,
-    backgroundColor: COLORS.gray200,
+    height: 4,
     borderRadius: 2,
   },
   progressFill: {
     height: '100%',
-    backgroundColor: COLORS.gold,
     borderRadius: 2,
+    backgroundColor: COLORS.royalPurple,
   },
   progressText: {
-    fontSize: 10,
-    color: COLORS.gray500,
+    fontSize: FONT_SIZE.xs,
     minWidth: 30,
   },
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
+    paddingHorizontal: SPACING.md,
   },
-  emptyState: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: SPACING.xxl * 2,
-  },
-  emptyTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: COLORS.gray600,
-    marginTop: SPACING.md,
-  },
-  emptySubtitle: {
-    fontSize: 14,
-    color: COLORS.gray400,
-    textAlign: 'center',
-    marginTop: SPACING.sm,
-    paddingHorizontal: SPACING.xl,
+  gridItem: {
+    width: '48%',
+    marginBottom: SPACING.md,
   },
 });

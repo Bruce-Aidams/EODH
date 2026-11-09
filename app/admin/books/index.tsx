@@ -5,23 +5,31 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  SafeAreaView,
   StatusBar,
   ActivityIndicator,
   Alert,
   TextInput,
+  Modal,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase/client';
 import { Book } from '@/types';
-import { COLORS, SPACING, BORDER_RADIUS } from '@/constants/theme';
+import { SPACING, BORDER_RADIUS } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
+import { useTheme } from '@/lib/theme/ThemeContext';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function AdminBooksScreen() {
   const router = useRouter();
+  const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const [books, setBooks] = useState<Book[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [processingAll, setProcessingAll] = useState(false);
+  const [processingLog, setProcessingLog] = useState<string[]>([]);
+  const [showProcessingModal, setShowProcessingModal] = useState(false);
 
   useEffect(() => {
     fetchBooks();
@@ -56,6 +64,56 @@ export default function AdminBooksScreen() {
     } catch (error) {
       Alert.alert('Error', 'Failed to update book status.');
     }
+  };
+
+  const handleProcessAll = async () => {
+    const unprocessed = books.filter(b => 
+      b.document_type === 'pdf' || b.document_type === 'epub' || b.document_type === 'docx' || b.document_type === 'markdown'
+    );
+
+    if (unprocessed.length === 0) {
+      Alert.alert('No Books to Process', 'All books have already been processed.');
+      return;
+    }
+
+    Alert.alert(
+      'Process All Books',
+      `This will process ${unprocessed.length} book(s) for reflow reading. This may take several minutes. Continue?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Start',
+          onPress: async () => {
+            setProcessingAll(true);
+            setProcessingLog([]);
+            setShowProcessingModal(true);
+
+            try {
+              const { processAllBooks } = await import('@/lib/admin/processAllBooks');
+              const result = await processAllBooks((index, total, title, stage) => {
+                setProcessingLog(prev => [...prev, `[${index + 1}/${total}] ${title}: ${stage}`]);
+              });
+
+              setProcessingLog(prev => [
+                ...prev,
+                '',
+                `Processing complete!`,
+                `Success: ${result.processed} book(s)`,
+                `Failed: ${result.failed} book(s)`,
+                ...(result.errors.length > 0 ? ['Errors:', ...result.errors] : []),
+              ]);
+
+              // Refresh books list
+              await fetchBooks();
+            } catch (err) {
+              setProcessingLog(prev => [...prev, `Error: ${err instanceof Error ? err.message : 'Unknown error'}`]);
+            }
+
+            setProcessingAll(false);
+          },
+        },
+      ]
+    );
   };
 
   const handleDelete = (book: Book) => {
@@ -101,109 +159,129 @@ export default function AdminBooksScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={COLORS.royalPurple} />
+      <SafeAreaView style={[styles.loadingContainer, { backgroundColor: colors.background }]} edges={['left', 'right']}>
+        <ActivityIndicator size="large" color={colors.primary} />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" />
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['left', 'right']}>
+      <StatusBar barStyle={colors.statusBar} />
       
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + SPACING.md, backgroundColor: colors.card, borderBottomColor: colors.border }]}>
         <TouchableOpacity onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color={COLORS.deepNavy} />
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Manage Books</Text>
-        <TouchableOpacity onPress={() => router.push('/admin/upload')}>
-          <Ionicons name="add-circle" size={28} color={COLORS.royalPurple} />
-        </TouchableOpacity>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Manage Books</Text>
+        <View style={styles.headerActions}>
+          <TouchableOpacity onPress={handleProcessAll} disabled={processingAll}>
+            <Ionicons name="sync-outline" size={24} color={processingAll ? colors.textMuted : colors.primary} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => router.push('/admin/upload')}>
+            <Ionicons name="add-circle" size={28} color={colors.primary} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Search */}
-      <View style={styles.searchContainer}>
+      <View style={[styles.searchContainer, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         <View style={styles.searchInput}>
-          <Ionicons name="search" size={20} color={COLORS.gray400} />
+          <Ionicons name="search" size={20} color={colors.textMuted} />
           <TextInput
-            style={styles.searchText}
+            style={[styles.searchText, { color: colors.text }]}
             placeholder="Search books..."
-            placeholderTextColor={COLORS.gray400}
+            placeholderTextColor={colors.textMuted}
             value={searchQuery}
             onChangeText={setSearchQuery}
           />
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + SPACING.xxl + 20 }]} showsVerticalScrollIndicator={false}>
         {filteredBooks.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Ionicons name="book-outline" size={64} color={COLORS.gray300} />
-            <Text style={styles.emptyTitle}>No Books</Text>
-            <Text style={styles.emptySubtitle}>
+          <View style={[styles.emptyState, { backgroundColor: colors.card }]}>
+            <Ionicons name="book-outline" size={64} color={colors.textMuted} />
+            <Text style={[styles.emptyTitle, { color: colors.text }]}>No Books</Text>
+            <Text style={[styles.emptySubtitle, { color: colors.textMuted }]}>
               {searchQuery ? 'No books match your search.' : 'Upload your first book to get started.'}
             </Text>
             {!searchQuery && (
               <TouchableOpacity
-                style={styles.uploadButton}
+                style={[styles.uploadButton, { backgroundColor: colors.primary }]}
                 onPress={() => router.push('/admin/upload')}
               >
-                <Ionicons name="cloud-upload" size={20} color={COLORS.white} />
-                <Text style={styles.uploadButtonText}>Upload Book</Text>
+                <Ionicons name="cloud-upload" size={20} color="#FFFFFF" />
+                <Text style={[styles.uploadButtonText, { color: '#FFFFFF' }]}>Upload Book</Text>
               </TouchableOpacity>
             )}
           </View>
         ) : (
           filteredBooks.map((book) => (
-            <View key={book.id} style={styles.bookCard}>
+            <View key={book.id} style={[styles.bookCard, { backgroundColor: colors.card, shadowColor: colors.cardShadow }]}>
               {/* Cover */}
               <View style={styles.bookCover}>
                 {book.cover_url ? (
                   <View style={styles.coverImage} />
                 ) : (
-                  <View style={styles.coverGradient}>
-                    <Ionicons name="book" size={32} color={COLORS.white} />
+                  <View style={[styles.coverGradient, { backgroundColor: colors.primary }]}>
+                    <Ionicons name="book" size={32} color="#FFFFFF" />
                   </View>
                 )}
-                <View style={[styles.typeBadge, { backgroundColor: book.document_type === 'pdf' ? COLORS.violet : COLORS.gold }]}>
-                  <Text style={styles.typeBadgeText}>
-                    {book.document_type === 'pdf' ? 'PDF' : 'MD'}
+                <View style={[styles.typeBadge, { backgroundColor: colors.primary }]}>
+                  <Text style={[styles.typeBadgeText, { color: '#FFFFFF' }]}>
+                    {book.document_type === 'pdf' ? 'PDF' : book.document_type === 'epub' ? 'EPUB' : book.document_type === 'docx' ? 'DOCX' : 'MD'}
                   </Text>
                 </View>
+                {book.processing_status && book.processing_status !== 'completed' && (
+                  <View style={[styles.statusBadge, { backgroundColor: book.processing_status === 'failed' ? colors.error : book.processing_status === 'processing' ? '#FF9800' : '#9E9E9E' }]}>
+                    <Text style={[styles.statusBadgeText, { color: '#FFFFFF' }]}>
+                      {book.processing_status === 'processing' ? 'Processing' : book.processing_status === 'failed' ? 'Failed' : 'Pending'}
+                    </Text>
+                  </View>
+                )}
               </View>
 
               {/* Info */}
               <View style={styles.bookInfo}>
                 <View style={styles.bookHeader}>
                   <View style={styles.bookTitleContainer}>
-                    <Text style={styles.bookTitle} numberOfLines={2}>{book.title}</Text>
-                    <Text style={styles.bookAuthor} numberOfLines={1}>{book.author}</Text>
+                    <Text style={[styles.bookTitle, { color: colors.text }]} numberOfLines={2}>{book.title}</Text>
+                    <Text style={[styles.bookAuthor, { color: colors.textSecondary }]} numberOfLines={1}>{book.author}</Text>
                   </View>
                   {book.is_published && (
                     <View style={styles.publishedBadge}>
-                      <Ionicons name="checkmark-circle" size={16} color={COLORS.success} />
+                      <Ionicons name="checkmark-circle" size={16} color={colors.primary} />
                     </View>
                   )}
                 </View>
 
                 <View style={styles.bookMeta}>
                   <View style={styles.metaItem}>
-                    <Ionicons name="calendar-outline" size={12} color={COLORS.gray500} />
-                    <Text style={styles.metaText}>
+                    <Ionicons name="calendar-outline" size={12} color={colors.textMuted} />
+                    <Text style={[styles.metaText, { color: colors.textMuted }]}>
                       {book.publication_date || 'No date'}
                     </Text>
                   </View>
                   <View style={styles.metaItem}>
-                    <Ionicons name="document-outline" size={12} color={COLORS.gray500} />
-                    <Text style={styles.metaText}>
+                    <Ionicons name="document-outline" size={12} color={colors.textMuted} />
+                    <Text style={[styles.metaText, { color: colors.textMuted }]}>
                       {formatFileSize(book.file_size)}
                     </Text>
                   </View>
+                  {book.total_chapters != null && book.total_chapters > 0 && (
+                    <View style={styles.metaItem}>
+                      <Ionicons name="layers-outline" size={12} color={colors.textMuted} />
+                      <Text style={[styles.metaText, { color: colors.textMuted }]}>
+                        {book.total_chapters} chapters
+                      </Text>
+                    </View>
+                  )}
                   {book.has_audio && (
                     <View style={styles.metaItem}>
-                      <Ionicons name="headset-outline" size={12} color={COLORS.gold} />
-                      <Text style={[styles.metaText, { color: COLORS.gold }]}>
+                      <Ionicons name="headset-outline" size={12} color={colors.primary} />
+                      <Text style={[styles.metaText, { color: colors.primary }]}>
                         Audio
                       </Text>
                     </View>
@@ -213,11 +291,11 @@ export default function AdminBooksScreen() {
                 {/* Actions */}
                 <View style={styles.bookActions}>
                   <TouchableOpacity
-                    style={[styles.actionButton, styles.previewButton]}
+                    style={[styles.actionButton, styles.previewButton, { borderColor: colors.border }]}
                     onPress={() => router.push(`/book/${book.id}`)}
                   >
-                    <Ionicons name="eye-outline" size={16} color={COLORS.royalPurple} />
-                    <Text style={[styles.actionButtonText, { color: COLORS.royalPurple }]}>
+                    <Ionicons name="eye-outline" size={16} color={colors.primary} />
+                    <Text style={[styles.actionButtonText, { color: colors.primary }]}>
                       Preview
                     </Text>
                   </TouchableOpacity>
@@ -226,18 +304,19 @@ export default function AdminBooksScreen() {
                     style={[
                       styles.actionButton,
                       book.is_published ? styles.unpublishButton : styles.publishButton,
+                      { borderColor: colors.border },
                     ]}
                     onPress={() => handleTogglePublish(book)}
                   >
                     <Ionicons
                       name={book.is_published ? 'eye-off-outline' : 'checkmark-circle-outline'}
                       size={16}
-                      color={book.is_published ? COLORS.warning : COLORS.success}
+                      color={book.is_published ? colors.error : colors.primary}
                     />
                     <Text
                       style={[
                         styles.actionButtonText,
-                        { color: book.is_published ? COLORS.warning : COLORS.success },
+                        { color: colors.primary },
                       ]}
                     >
                       {book.is_published ? 'Unpublish' : 'Publish'}
@@ -245,11 +324,11 @@ export default function AdminBooksScreen() {
                   </TouchableOpacity>
 
                   <TouchableOpacity
-                    style={[styles.actionButton, styles.deleteButton]}
+                    style={[styles.actionButton, styles.deleteButton, { borderColor: colors.border }]}
                     onPress={() => handleDelete(book)}
                   >
-                    <Ionicons name="trash-outline" size={16} color={COLORS.error} />
-                    <Text style={[styles.actionButtonText, { color: COLORS.error }]}>
+                    <Ionicons name="trash-outline" size={16} color={colors.error} />
+                    <Text style={[styles.actionButtonText, { color: colors.error }]}>
                       Delete
                     </Text>
                   </TouchableOpacity>
@@ -262,6 +341,55 @@ export default function AdminBooksScreen() {
         {/* Bottom spacing */}
         <View style={{ height: SPACING.xl }} />
       </ScrollView>
+
+      {/* Processing Modal */}
+      <Modal
+        visible={showProcessingModal}
+        animationType="slide"
+        onRequestClose={() => { if (!processingAll) setShowProcessingModal(false); }}
+      >
+        <SafeAreaView style={[styles.modalContainer, { backgroundColor: colors.background }]}>
+          <View style={[styles.modalHeader, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Processing Books</Text>
+            {!processingAll && (
+              <TouchableOpacity onPress={() => setShowProcessingModal(false)}>
+                <Ionicons name="close" size={24} color={colors.text} />
+              </TouchableOpacity>
+            )}
+          </View>
+
+          <ScrollView style={styles.modalContent}>
+            {processingLog.map((log, i) => (
+              <Text
+                key={i}
+                style={[
+                  styles.logLine,
+                  { color: log.startsWith('Error') ? colors.error : log.includes('Success') ? colors.primary : colors.text },
+                ]}
+              >
+                {log}
+              </Text>
+            ))}
+            {processingAll && (
+              <View style={styles.processingIndicator}>
+                <ActivityIndicator size="small" color={colors.primary} />
+                <Text style={[styles.processingText, { color: colors.textSecondary }]}>Processing...</Text>
+              </View>
+            )}
+          </ScrollView>
+
+          {!processingAll && (
+            <View style={[styles.modalFooter, { borderTopColor: colors.border, backgroundColor: colors.card }]}>
+              <TouchableOpacity
+                style={[styles.closeButton, { backgroundColor: colors.primary }]}
+                onPress={() => setShowProcessingModal(false)}
+              >
+                <Text style={[styles.closeButtonText, { color: '#FFFFFF' }]}>Done</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -269,11 +397,9 @@ export default function AdminBooksScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.lightBackground,
   },
   loadingContainer: {
     flex: 1,
-    backgroundColor: COLORS.lightBackground,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -281,27 +407,22 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.md,
+    paddingBottom: SPACING.sm,
     gap: SPACING.md,
-    backgroundColor: COLORS.white,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.gray200,
   },
   headerTitle: {
     flex: 1,
     fontSize: 20,
     fontWeight: '600',
-    color: COLORS.deepNavy,
     textAlign: 'center',
   },
   searchContainer: {
     padding: SPACING.md,
-    backgroundColor: COLORS.white,
   },
   searchInput: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.gray100,
     borderRadius: BORDER_RADIUS.md,
     paddingHorizontal: SPACING.md,
     gap: SPACING.sm,
@@ -310,7 +431,6 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: SPACING.sm,
     fontSize: 15,
-    color: COLORS.deepNavy,
   },
   content: {
     padding: SPACING.md,
@@ -323,19 +443,16 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: COLORS.gray600,
     marginTop: SPACING.md,
   },
   emptySubtitle: {
     fontSize: 14,
-    color: COLORS.gray400,
     textAlign: 'center',
     marginTop: SPACING.sm,
     paddingHorizontal: SPACING.xl,
   },
   uploadButton: {
     flexDirection: 'row',
-    backgroundColor: COLORS.royalPurple,
     borderRadius: BORDER_RADIUS.md,
     paddingVertical: SPACING.md,
     paddingHorizontal: SPACING.lg,
@@ -347,15 +464,12 @@ const styles = StyleSheet.create({
   uploadButtonText: {
     fontSize: 15,
     fontWeight: '600',
-    color: COLORS.white,
   },
   bookCard: {
     flexDirection: 'row',
-    backgroundColor: COLORS.white,
     borderRadius: BORDER_RADIUS.md,
     padding: SPACING.md,
     marginBottom: SPACING.sm,
-    shadowColor: COLORS.deepNavy,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 8,
@@ -371,12 +485,10 @@ const styles = StyleSheet.create({
   coverImage: {
     width: '100%',
     height: '100%',
-    backgroundColor: COLORS.gray200,
   },
   coverGradient: {
     width: '100%',
     height: '100%',
-    backgroundColor: COLORS.royalPurple,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -391,7 +503,18 @@ const styles = StyleSheet.create({
   typeBadgeText: {
     fontSize: 8,
     fontWeight: 'bold',
-    color: COLORS.white,
+  },
+  statusBadge: {
+    position: 'absolute',
+    bottom: 4,
+    left: 4,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  statusBadgeText: {
+    fontSize: 7,
+    fontWeight: 'bold',
   },
   bookInfo: {
     flex: 1,
@@ -409,11 +532,9 @@ const styles = StyleSheet.create({
   bookTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: COLORS.deepNavy,
   },
   bookAuthor: {
-    fontSize: 12,
-    color: COLORS.gray500,
+    fontSize: 11,
     marginTop: 2,
   },
   publishedBadge: {
@@ -435,7 +556,6 @@ const styles = StyleSheet.create({
   },
   metaText: {
     fontSize: 11,
-    color: COLORS.gray500,
   },
   bookActions: {
     flexDirection: 'row',
@@ -450,19 +570,66 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   previewButton: {
-    backgroundColor: COLORS.royalPurple + '10',
   },
   publishButton: {
-    backgroundColor: COLORS.success + '10',
   },
   unpublishButton: {
-    backgroundColor: COLORS.warning + '10',
   },
   deleteButton: {
-    backgroundColor: COLORS.error + '10',
   },
   actionButtonText: {
     fontSize: 11,
     fontWeight: '500',
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.md,
+  },
+  modalContainer: {
+    flex: 1,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.md,
+    borderBottomWidth: 1,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  modalContent: {
+    flex: 1,
+    padding: SPACING.md,
+  },
+  logLine: {
+    fontSize: 13,
+    fontFamily: 'monospace',
+    paddingVertical: 2,
+  },
+  processingIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    marginTop: SPACING.md,
+  },
+  processingText: {
+    fontSize: 13,
+  },
+  modalFooter: {
+    padding: SPACING.md,
+    borderTopWidth: 1,
+  },
+  closeButton: {
+    paddingVertical: SPACING.md,
+    borderRadius: BORDER_RADIUS.md,
+    alignItems: 'center',
+  },
+  closeButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
   },
 });

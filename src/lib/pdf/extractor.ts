@@ -233,8 +233,8 @@ export class PdfTextExtractor {
       const endTime = currentTime + segment.estimatedDuration;
 
       alignments.push({
-        id: `pdf-align-${bookId}-${i}`,
-        segment_id: `pdf-seg-${bookId}-${i}`,
+        id: undefined,
+        segment_id: null,
         book_id: bookId,
         chapter_id: null,
         text: segment.text,

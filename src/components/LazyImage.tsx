@@ -1,8 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { View, Image, ActivityIndicator, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import * as FileSystem from 'expo-file-system';
-import { COLORS, BORDER_RADIUS } from '@/constants/theme';
+
+// Use inline defaults to avoid module-level import issues in production R8 bundles
+const C = { white: '#FFFFFF', deepNavy: '#080B2E', gray200: '#E5E7EB', royalPurple: '#5415E8' };
+const R = { sm: 8, md: 12, lg: 16, xl: 24, full: 9999 };
+
+// Lazy-load expo-file-system to avoid crashing if native module is unavailable
+let cacheDirectory: string | null = null;
+let getInfoAsync: ((uri: string) => any) | null = null;
+let downloadAsync: ((uri: string, dest: string) => any) | null = null;
+try {
+  const FileSystem = require('expo-file-system/legacy');
+  getInfoAsync = FileSystem.getInfoAsync;
+  downloadAsync = FileSystem.downloadAsync;
+  cacheDirectory = FileSystem.cacheDirectory || null;
+} catch {
+  // Fallback: skip caching
+}
 
 export interface LazyImageProps {
   uri?: string;
@@ -26,7 +41,7 @@ export default function LazyImage({
   uri,
   width = 100,
   height = 140,
-  borderRadius = BORDER_RADIUS.md,
+  borderRadius = R.md,
   style,
   containerStyle,
 }: LazyImageProps) {
@@ -36,17 +51,22 @@ export default function LazyImage({
 
   // Cache key based on URI
   const cacheKey = uri ? `eodh_cover_${uri.replace(/[^a-zA-Z0-9]/g, '_')}.jpg` : null;
-  const cachePath = cacheKey ? `${FileSystem.cacheDirectory}${cacheKey}` : null;
+  const cachePath = cacheKey && cacheDirectory ? `${cacheDirectory}${cacheKey}` : null;
 
   useEffect(() => {
     if (!uri) return;
 
     let cancelled = false;
 
-    // Check cache first
+    // Check cache first (only if file system is available)
     const checkCache = async () => {
+      if (!getInfoAsync || !cachePath) {
+        // Skip caching, load directly from network
+        if (!cancelled) loadImage();
+        return;
+      }
       try {
-        const info = await FileSystem.getInfoAsync(cachePath!);
+        const info = await getInfoAsync(cachePath);
         if (info.exists && !cancelled) {
           setLocalUri(info.uri);
           return;
@@ -71,28 +91,34 @@ export default function LazyImage({
   const loadImage = async () => {
     if (!uri || loading) return;
 
-    setLoading(true);
-    setError(false);
+    // If file system is available, try caching
+    if (downloadAsync && cachePath) {
+      setLoading(true);
+      setError(false);
 
-    try {
-      const downloadRes = await FileSystem.downloadAsync(uri, cachePath!);
-      
-      if (downloadRes.status === 200) {
-        setLocalUri(downloadRes.uri);
-      } else {
+      try {
+        const downloadRes = await downloadAsync(uri, cachePath);
+        
+        if (downloadRes.status === 200) {
+          setLocalUri(downloadRes.uri);
+        } else {
+          setError(true);
+        }
+      } catch (e) {
         setError(true);
+      } finally {
+        setLoading(false);
       }
-    } catch (e) {
-      setError(true);
-    } finally {
-      setLoading(false);
+    } else {
+      // No caching available, just use the URI directly
+      setLocalUri(uri);
     }
   };
 
   // Render placeholder
   const renderPlaceholder = () => (
     <View style={[styles.placeholder, { width, height, borderRadius }]}>
-      <Ionicons name="book" size={32} color={COLORS.white} />
+      <Ionicons name="book" size={32} color={C.white} />
     </View>
   );
 
@@ -116,7 +142,7 @@ export default function LazyImage({
           containerStyle,
         ]}
       >
-        <ActivityIndicator size="small" color={COLORS.royalPurple} />
+        <ActivityIndicator size="small" color={C.royalPurple} />
       </View>
     );
   }
@@ -151,16 +177,16 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   image: {
-    backgroundColor: COLORS.gray200,
+    backgroundColor: C.gray200,
   },
   placeholder: {
-    backgroundColor: COLORS.deepNavy,
+    backgroundColor: C.deepNavy,
     justifyContent: 'center',
     alignItems: 'center',
   },
   loadingContainer: {
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: COLORS.gray200,
+    backgroundColor: C.gray200,
   },
 });

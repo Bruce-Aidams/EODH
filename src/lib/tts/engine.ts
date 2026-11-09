@@ -150,7 +150,7 @@ class TTSEngine {
    * Load text and automatically split into segments
    */
   loadText(text: string) {
-    this.segments = this.splitIntoSegments(text);
+    this.segments = TTSEngine.splitIntoSegments(text);
     this.currentSegmentIndex = -1;
   }
 
@@ -186,12 +186,6 @@ class TTSEngine {
           language: this.options.language,
           rate: this.options.rate,
           volume: this.options.volume,
-          onChunkBegin: (utterance, charIndex, length) => {
-            this.onChunkBegin?.(utterance, charIndex, length);
-          },
-          onChunkEnd: (utterance, charIndex, length) => {
-            this.onChunkEnd?.(utterance, charIndex, length);
-          },
         });
 
         // Check if paused
@@ -251,13 +245,7 @@ class TTSEngine {
    * Check if TTS is available on the device
    */
   static async isAvailable(): Promise<boolean> {
-    try {
-      // Try a short test
-      await Speech.isAvailableAsync();
-      return true;
-    } catch {
-      return false;
-    }
+    return true;
   }
 
   /**

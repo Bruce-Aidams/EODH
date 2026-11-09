@@ -1,19 +1,21 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { Platform } from 'react-native';
-import { expo_audio } from 'expo-audio';
 
 /**
  * Media Controls for Lock Screen and Headphone Integration
  *
  * Provides lock-screen media controls and headphone button support
- * for Android audiobook playback. Uses expo-audio's media controls
- * API to register media session actions.
+ * for Android audiobook playback.
  *
- * Features:
- * - Lock screen play/pause/skip controls
- * - Headphone button support (play/pause/next/previous)
- * - Media notification with book title, author, and album art
- * - Background playback support
+ * Note: expo-audio does not provide a setMediaControls API.
+ * This module provides safe no-op stubs so the audio and sync
+ * routes do not crash at startup. Media controls should be
+ * implemented using a dedicated library (e.g., react-native-track-player)
+ * when lock-screen controls are needed.
+ *
+ * Features (stubbed):
+ * - Lock screen play/pause/skip controls (not implemented)
+ * - Headphone button support (not implemented)
  *
  * Usage:
  * ```tsx
@@ -51,156 +53,31 @@ export interface MediaControlsState {
 /**
  * Hook for managing lock-screen media controls and headphone integration.
  *
- * @param options - Media controls configuration
- * @returns Media controls state
+ * Currently a safe no-op stub — expo-audio does not expose a media
+ * controls API. Returns isActive: false to indicate controls are
+ * not available.
+ *
+ * @param options - Media controls configuration (ignored)
+ * @returns Media controls state with isActive: false
  */
-export function useMediaControls(options: MediaControlsOptions): MediaControlsState {
-  const {
-    title,
-    artist,
-    album,
-    isPlaying,
-    onPlay,
-    onPause,
-    onNext,
-    onPrevious,
-    onSeek,
-    onStop,
-  } = options;
-
-  const mediaControlsRef = useRef<ReturnType<typeof expo_audio> | null>(null);
+export function useMediaControls(_options: MediaControlsOptions): MediaControlsState {
   const [state, setState] = useState<MediaControlsState>({
     isActive: false,
     error: null,
   });
 
   useEffect(() => {
-    // Media controls are only supported on physical devices, not simulators
+    // Media controls are not available via expo-audio.
+    // On web, skip entirely.
     if (Platform.OS === 'web') {
       return;
     }
 
-    let mounted = true;
-
-    const setupMediaControls = async () => {
-      try {
-        // Register media controls handlers
-        const controls = await expo_audio.setMediaControls({
-          data: {
-            title,
-            artist,
-            album: album || 'EODH Audiobooks',
-            isPlaying,
-          },
-          onPlay: () => {
-            if (mounted) onPlay();
-          },
-          onPause: () => {
-            if (mounted) onPause();
-          },
-          onNext: () => {
-            if (mounted) onNext();
-          },
-          onPrevious: () => {
-            if (mounted) onPrevious();
-          },
-          onSeek: (position) => {
-            if (mounted && onSeek) {
-              onSeek(position);
-            }
-          },
-          onStop: () => {
-            if (mounted && onStop) {
-              onStop();
-            }
-          },
-          onTogglePlayPause: () => {
-            if (mounted) {
-              if (isPlaying) {
-                onPause();
-              } else {
-                onPlay();
-              }
-            }
-          },
-          onTogglePlayback: () => {
-            if (mounted) {
-              if (isPlaying) {
-                onPause();
-              } else {
-                onPlay();
-              }
-            }
-          },
-        });
-
-        if (mounted) {
-          mediaControlsRef.current = controls;
-          setState({ isActive: true, error: null });
-        }
-      } catch (error) {
-        console.error('Failed to set up media controls:', error);
-        if (mounted) {
-          setState({
-            isActive: false,
-            error: error instanceof Error ? error.message : 'Failed to set up media controls',
-          });
-        }
-      }
-    };
-
-    setupMediaControls();
-
-    return () => {
-      mounted = false;
-      // Clean up media controls on unmount
-      if (mediaControlsRef.current) {
-        try {
-          expo_audio.setMediaControls(null);
-        } catch (error) {
-          console.error('Failed to clean up media controls:', error);
-        }
-      }
-    };
-  }, [title, artist, album, isPlaying, onPlay, onPause, onNext, onPrevious, onSeek, onStop]);
-
-  // Update media controls data when playback state changes
-  useEffect(() => {
-    if (mediaControlsRef.current) {
-      try {
-        expo_audio.setMediaControls({
-          data: {
-            title,
-            artist,
-            album: album || 'EODH Audiobooks',
-            isPlaying,
-          },
-          onPlay: () => onPlay(),
-          onPause: () => onPause(),
-          onNext: () => onNext(),
-          onPrevious: () => onPrevious(),
-          onSeek: onSeek ? (position) => onSeek(position) : undefined,
-          onStop: onStop,
-          onTogglePlayPause: () => {
-            if (isPlaying) {
-              onPause();
-            } else {
-              onPlay();
-            }
-          },
-          onTogglePlayback: () => {
-            if (isPlaying) {
-              onPause();
-            } else {
-              onPlay();
-            }
-          },
-        });
-      } catch (error) {
-        console.error('Failed to update media controls:', error);
-      }
-    }
-  }, [isPlaying, title, artist, album]);
+    // No-op: expo-audio has no setMediaControls API.
+    // To add real media controls, integrate a library like
+    // react-native-track-player or expo-av's legacy media controls.
+    setState({ isActive: false, error: null });
+  }, []);
 
   return state;
 }
@@ -208,29 +85,20 @@ export function useMediaControls(options: MediaControlsOptions): MediaControlsSt
 /**
  * Hook for managing headphone button events.
  *
- * Listens for headphone button presses and maps them to
- * playback actions.
+ * Currently a safe no-op stub — headphone controls require a
+ * dedicated media session library.
  *
- * @param handlers - Event handlers for headphone buttons
+ * @param handlers - Event handlers for headphone buttons (ignored)
  */
-export function useHeadphoneControls(handlers: {
+export function useHeadphoneControls(_handlers: {
   onPlayPause: () => void;
   onNext: () => void;
   onPrevious: () => void;
 }) {
-  const { onPlayPause, onNext, onPrevious } = handlers;
-
   useEffect(() => {
-    // Headphone controls are handled by the media session
-    // on most platforms. On Android, the media session
-    // automatically routes headphone button events to
-    // the registered media controls handlers.
-    
-    // No additional setup needed for Android headphone controls
-    // when using expo-audio's media controls API.
-    
+    // No-op: headphone controls require a dedicated media session library.
     return () => {
       // Cleanup if needed
     };
-  }, [onPlayPause, onNext, onPrevious]);
+  }, []);
 }

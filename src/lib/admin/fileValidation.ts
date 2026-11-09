@@ -1,4 +1,4 @@
-import * as FileSystem from 'expo-file-system';
+import { getInfoAsync, readAsStringAsync, EncodingType } from 'expo-file-system/legacy';
 
 /**
  * File Validation Utility for EODH Admin
@@ -19,13 +19,15 @@ export interface FileInfo {
   size: number;
   mimeType: string;
   extension: string;
-  type: 'pdf' | 'markdown' | 'image' | 'audio' | 'subtitle' | 'unknown';
+  type: 'pdf' | 'markdown' | 'epub' | 'docx' | 'image' | 'audio' | 'subtitle' | 'unknown';
 }
 
 // File size limits (in bytes)
 const MAX_FILE_SIZES = {
   pdf: 100 * 1024 * 1024,        // 100 MB
   markdown: 10 * 1024 * 1024,    // 10 MB
+  epub: 50 * 1024 * 1024,        // 50 MB
+  docx: 25 * 1024 * 1024,        // 25 MB
   image: 10 * 1024 * 1024,       // 10 MB
   audio: 200 * 1024 * 1024,      // 200 MB
   subtitle: 1 * 1024 * 1024,     // 1 MB
@@ -35,6 +37,8 @@ const MAX_FILE_SIZES = {
 const ALLOWED_EXTENSIONS = {
   pdf: ['.pdf'],
   markdown: ['.md', '.markdown'],
+  epub: ['.epub'],
+  docx: ['.docx'],
   image: ['.jpg', '.jpeg', '.png', '.webp', '.gif'],
   audio: ['.mp3', '.wav', '.m4a', '.ogg', '.flac', '.aac'],
   subtitle: ['.srt', '.vtt', '.webvtt'],
@@ -65,7 +69,7 @@ function getFileType(extension: string): FileInfo['type'] {
  */
 export async function validateFile(
   fileUri: string,
-  fileType: 'pdf' | 'markdown' | 'image' | 'audio' | 'subtitle'
+  fileType: 'pdf' | 'markdown' | 'epub' | 'docx' | 'image' | 'audio' | 'subtitle'
 ): Promise<ValidationResult> {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -73,7 +77,7 @@ export async function validateFile(
 
   try {
     // Get file info
-    const fileInfoResult = await FileSystem.getInfoAsync(fileUri);
+    const fileInfoResult = await getInfoAsync(fileUri);
     
     if (!fileInfoResult.exists) {
       return {
@@ -91,7 +95,7 @@ export async function validateFile(
     fileInfo = {
       name,
       size: fileInfoResult.size || 0,
-      mimeType: fileInfoResult.mimeType || 'unknown',
+      mimeType: (fileInfoResult as any).mimeType || 'unknown',
       extension,
       type,
     };
@@ -128,8 +132,8 @@ export async function validateFile(
     if (fileType === 'pdf' && extension === '.pdf') {
       // Check if it's a valid PDF by reading the header
       try {
-        const content = await FileSystem.readAsStringAsync(fileUri, {
-          encoding: FileSystem.EncodingType.UTF8,
+        const content = await readAsStringAsync(fileUri, {
+          encoding: EncodingType.UTF8,
         });
         
         if (!content.startsWith('%PDF')) {
@@ -161,7 +165,7 @@ export async function validateFile(
  * Validate multiple files at once.
  */
 export async function validateFiles(
-  files: Array<{ uri: string; type: 'pdf' | 'markdown' | 'image' | 'audio' | 'subtitle' }>
+  files: Array<{ uri: string; type: 'pdf' | 'markdown' | 'epub' | 'docx' | 'image' | 'audio' | 'subtitle' }>
 ): Promise<ValidationResult[]> {
   return Promise.all(
     files.map(file => validateFile(file.uri, file.type))

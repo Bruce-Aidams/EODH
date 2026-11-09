@@ -26,6 +26,8 @@ interface LibraryState {
   setSortBy: (sortBy: 'title' | 'date' | 'author') => void;
   getReadingProgress: (bookId: string) => Promise<ReadingProgress | null>;
   getListeningProgress: (bookId: string) => Promise<ListeningProgress | null>;
+  fetchReadingProgress: () => Promise<void>;
+  fetchListeningProgress: () => Promise<void>;
   updateReadingProgress: (progress: Partial<ReadingProgress>) => Promise<void>;
   updateListeningProgress: (progress: Partial<ListeningProgress>) => Promise<void>;
   getBookmarks: (bookId: string) => Promise<Bookmark[]>;
@@ -57,12 +59,13 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   fetchBooks: async () => {
     set({ isLoading: true });
     try {
+      // Try fetching with is_published filter first; fall back to all books if the column doesn't exist
       let query = supabase.from('books').select('*').eq('is_published', true);
-      
+
       if (get().selectedCategory) {
         query = query.eq('category_id', get().selectedCategory!);
       }
-      
+
       switch (get().sortBy) {
         case 'title':
           query = query.order('title', { ascending: true });
@@ -74,28 +77,70 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
           query = query.order('author', { ascending: true });
           break;
       }
-      
-      const { data, error } = await query;
-      if (error) throw error;
-      
+
+      let { data, error } = await query;
+      if (error) {
+        // If the is_published column doesn't exist, fall back to fetching all books
+        console.warn('fetchBooks: is_published filter failed, falling back to all books:', error.message);
+        let fallbackQuery = supabase.from('books').select('*');
+
+        if (get().selectedCategory) {
+          fallbackQuery = fallbackQuery.eq('category_id', get().selectedCategory!);
+        }
+
+        switch (get().sortBy) {
+          case 'title':
+            fallbackQuery = fallbackQuery.order('title', { ascending: true });
+            break;
+          case 'date':
+            fallbackQuery = fallbackQuery.order('created_at', { ascending: false });
+            break;
+          case 'author':
+            fallbackQuery = fallbackQuery.order('author', { ascending: true });
+            break;
+        }
+
+        const { data: fallbackData, error: fallbackError } = await fallbackQuery;
+        if (fallbackError) {
+          console.error('fetchBooks: fallback also failed:', fallbackError.message);
+          set({ books: [], isLoading: false });
+          return;
+        }
+        set({ books: fallbackData || [], isLoading: false });
+        return;
+      }
+
       set({ books: data || [], isLoading: false });
-    } catch {
+    } catch (err) {
+      console.error('fetchBooks: unexpected error:', err);
       set({ isLoading: false });
     }
   },
 
   fetchFeaturedBooks: async () => {
     try {
-      const { data } = await supabase
+      // Try fetching with is_published filter first; fall back to all books if the column doesn't exist
+      let { data, error } = await supabase
         .from('books')
         .select('*')
         .eq('is_published', true)
         .order('created_at', { ascending: false })
         .limit(5);
-      
+
+      if (error) {
+        console.warn('fetchFeaturedBooks: is_published filter failed, falling back to all books:', error.message);
+        const { data: fallbackData } = await supabase
+          .from('books')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(5);
+        set({ featuredBooks: fallbackData || [] });
+        return;
+      }
+
       set({ featuredBooks: data || [] });
-    } catch {
-      // Silent fail
+    } catch (err) {
+      console.error('fetchFeaturedBooks: unexpected error:', err);
     }
   },
 
@@ -112,7 +157,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         .limit(10);
       
       if (data) {
-        const books = data.map(item => item.books).filter(Boolean) as Book[];
+        const books = (data as any[]).map(item => item.books).filter(Boolean) as unknown as Book[];
         set({ recentlyOpened: books });
       }
     } catch {
@@ -182,6 +227,26 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       .single();
     
     return data;
+  },
+
+  fetchReadingProgress: async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      await supabase.from('reading_progress').select('*').eq('user_id', user.id);
+    } catch {
+      // Silent fail
+    }
+  },
+
+  fetchListeningProgress: async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      await supabase.from('listening_progress').select('*').eq('user_id', user.id);
+    } catch {
+      // Silent fail
+    }
   },
 
   updateReadingProgress: async (progress: Partial<ReadingProgress>) => {

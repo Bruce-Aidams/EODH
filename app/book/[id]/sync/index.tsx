@@ -5,41 +5,64 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  SafeAreaView,
   StatusBar,
   ActivityIndicator,
   Modal,
   Dimensions,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import Animated from 'react-native-reanimated';
 import { supabase } from '@/lib/supabase/client';
 import { useAudioStore } from '@/stores/audioStore';
 import { useLibraryStore } from '@/stores/libraryStore';
 import { useSettingsStore } from '@/stores/settingsStore';
-import { Book, AudioSegment, AudioAlignment } from '@/types';
-import { COLORS, SPACING, BORDER_RADIUS } from '@/constants/theme';
+import { Book, AudioSegment, AudioAlignment, BookChapter } from '@/types';
+import { SPACING, BORDER_RADIUS } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
-import { useCompleteAudioPlayer } from '@/lib/audio/player';
 import { useMediaControls } from '@/lib/audio/mediaControls';
-import { syncEngine, SyncPosition, WordPosition } from '@/lib/sync/engine';
+import { syncEngine, SyncPosition, WordPosition, SyncEngine } from '@/lib/sync/engine';
 import { getAudioSegmentUri } from '@/lib/offline/fileManager';
+import { useTheme } from '@/lib/theme/ThemeContext';
+import { AnimatedView } from '@/components/AnimatedView';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { ttsEngine } from '@/lib/tts/engine';
+import { useCompleteAudioPlayer } from '@/lib/audio/player';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 /**
- * Synchronized Read-Along Screen with real audio playback.
+ * Strip HTML tags from a string to get plain text
+ */
+function stripHtml(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/?(p|div|h[1-6]|li|ul|ol|blockquote|section|article|nav|header|footer)\b[^>]*>/gi, '\n')
+    .replace(/<\/?[^>]+(>|$)/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/**
+ * Synchronized Read-Along Screen with TTS fallback.
  * 
- * Integrates expo-audio playback with the sync engine to highlight
- * the currently spoken sentence as audio plays. Supports both
- * pre-recorded audio with alignment data and TTS-based sync.
+ * Supports two modes:
+ * 1. Pre-recorded audio with alignment data (full sync)
+ * 2. TTS-based sync for any book without pre-recorded audio
  * 
  * Features:
- * - Real audio playback via expo-audio
- * - Sentence-level highlighting based on alignment data
+ * - Sentence-level highlighting as audio/TTS plays
  * - Auto-scroll to keep highlighted text visible
- * - Playback controls (play/pause, skip ±10s, speed)
+ * - Word-level highlighting where available
+ * - Playback controls (play/pause, skip ±1 sentence, speed)
  * - Reading settings (theme, font size)
- * - Fallback to TTS-based sync when no alignment data exists
+ * - Works with all processed book formats (PDF, EPUB, DOCX, Markdown)
  */
 export default function SyncReaderScreen() {
   const { id } = useLocalSearchParams();
@@ -47,12 +70,13 @@ export default function SyncReaderScreen() {
   const { updateListeningProgress, updateReadingProgress } = useLibraryStore();
   const { readingSettings } = useSettingsStore();
   const { audioSettings } = useSettingsStore();
+  const { colors, isDark } = useTheme();
+  const insets = useSafeAreaInsets();
   const {
     isPlaying: storeIsPlaying,
     isSyncing,
     highlightedText,
     currentPage,
-    setBufferStatus,
     startSync,
     stopSync,
     updateSyncState,
@@ -72,23 +96,34 @@ export default function SyncReaderScreen() {
   const [useWordLevel, setUseWordLevel] = useState(false);
   const [totalDuration, setTotalDuration] = useState(0);
   const [globalTime, setGlobalTime] = useState(0);
+  
+  // TTS mode state
+  const [useTTS, setUseTTS] = useState(false);
+  const [ttsCurrentSentenceIndex, setTtsCurrentSentenceIndex] = useState(-1);
+  const [ttsEstimatedTimings, setTtsEstimatedTimings] = useState<AudioAlignment[]>([]);
+  const [ttsIsPlaying, setTtsIsPlaying] = useState(false);
 
-  const scrollViewRef = useRef<ScrollView>(null);
-  const sentenceRefs = useRef<Array<TouchableOpacity | null>>([]);
-  const autoScrollTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const scrollViewRef = useRef<any>(null);
+  const sentenceRefs = useRef<any[]>([]);
+  const autoScrollTimerRef = useRef<number | null>(null);
   const bookIdRef = useRef<string>('');
 
   const bookId = Array.isArray(id) ? id[0] : id;
 
-  // Calculate total duration from segments
+  // Calculate total duration from segments (audio mode) or estimated timings (TTS mode)
   useEffect(() => {
-    const total = bookSegments.reduce((sum, seg) => {
-      return sum + (seg.end_time - seg.start_time);
-    }, 0);
-    setTotalDuration(total);
-  }, [bookSegments]);
+    if (bookSegments.length > 0) {
+      const total = bookSegments.reduce((sum, seg) => {
+        return sum + (seg.end_time - seg.start_time);
+      }, 0);
+      setTotalDuration(total);
+    } else if (ttsEstimatedTimings.length > 0) {
+      const last = ttsEstimatedTimings[ttsEstimatedTimings.length - 1];
+      setTotalDuration(last.end_time);
+    }
+  }, [bookSegments, ttsEstimatedTimings]);
 
-  // Determine current segment index based on global time
+  // Determine current segment index based on global time (audio mode)
   const currentSegmentIndex = (() => {
     if (bookSegments.length === 0) return 0;
     for (let i = bookSegments.length - 1; i >= 0; i--) {
@@ -104,35 +139,28 @@ export default function SyncReaderScreen() {
 
   // Real audio player — keyed on segment so it reloads when segment changes
   const {
-    isPlaying,
+    isPlaying: audioIsPlaying,
     isLoaded,
     isBuffering,
     currentTime: playerTime,
     duration: playerDuration,
-    play,
-    pause,
-    seekTo,
-    setPlaybackRate,
-    didJustFinish,
+    play: audioPlay,
+    pause: audioPause,
+    seekTo: audioSeekTo,
+    setPlaybackRate: audioSetPlaybackRate,
   } = useCompleteAudioPlayer(
-    currentAudioUri,
+    useTTS ? null : currentAudioUri,
     audioSettings.playbackSpeed,
     {
-      onPositionChange: (time) => {
+      onPositionChange: (time: number) => {
         if (currentSegment) {
           const newGlobalTime = currentSegment.start_time + time;
           setGlobalTime(newGlobalTime);
-          
-          // Update sync engine
           syncEngine.updateTime(newGlobalTime);
         }
       },
-      onDurationChange: (dur) => {
-        // Duration is for the current segment only
-      },
-      onBufferingChange: (buf) => {
-        setBufferStatus(buf ? 'buffering' : 'ready');
-      },
+      onDurationChange: () => {},
+      onBufferingChange: () => {},
       onPlay: () => {
         useAudioStore.setState({ isPlaying: true });
       },
@@ -140,7 +168,6 @@ export default function SyncReaderScreen() {
         useAudioStore.setState({ isPlaying: false });
       },
       onPlaybackEnd: () => {
-        // Auto-advance to next segment
         if (currentSegmentIndex < bookSegments.length - 1) {
           // Will be handled by segment index change
         } else {
@@ -148,18 +175,19 @@ export default function SyncReaderScreen() {
           stopSync();
         }
       },
-    },
-    currentSegmentIndex
+    } as any
   );
 
   // Sync store state with real player
   useEffect(() => {
-    useAudioStore.setState({ isPlaying });
-  }, [isPlaying]);
+    if (!useTTS) {
+      useAudioStore.setState({ isPlaying: audioIsPlaying });
+    }
+  }, [audioIsPlaying, useTTS]);
 
-  // Initialize sync engine when alignments are loaded
+  // Initialize sync engine when alignments are loaded (audio mode)
   useEffect(() => {
-    if (bookAlignments.length > 0) {
+    if (!useTTS && bookAlignments.length > 0) {
       syncEngine.initialize({
         alignments: bookAlignments,
         segments: bookSegments,
@@ -177,7 +205,7 @@ export default function SyncReaderScreen() {
           
           // Update audio store for highlighting
           const alignment: AudioAlignment = {
-            id: position.segmentId,
+            id: position.segmentId ?? undefined,
             segment_id: position.segmentId,
             book_id: bookIdRef.current,
             chapter_id: null,
@@ -193,29 +221,76 @@ export default function SyncReaderScreen() {
         },
       });
     }
-  }, [bookAlignments, bookSegments, content]);
+  }, [bookAlignments, bookSegments, content, useTTS]);
 
-  // Update current word when global time changes and word-level is enabled
+  // Initialize TTS-based sync when content is loaded and no audio data exists
   useEffect(() => {
-    if (!useWordLevel || !isPlaying) {
-      setCurrentWord(null);
-      return;
+    if (useTTS && content) {
+      // Generate estimated timings for TTS
+      const timings = SyncEngine.estimateTTSTimings(content, String(bookId), audioSettings.playbackSpeed);
+      setTtsEstimatedTimings(timings);
+      
+      // Set up TTS callbacks
+      ttsEngine.setOnChunkBegin((utterance) => {
+        const searchText = utterance.trim().substring(0, 50).toLowerCase();
+        const sentences = content.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 0);
+        
+        for (let i = 0; i < sentences.length; i++) {
+          if (sentences[i].toLowerCase().includes(searchText)) {
+            setTtsCurrentSentenceIndex(i);
+            
+            // Find the timing for this sentence
+            const timing = timings[i];
+            if (timing) {
+              const position: SyncPosition = {
+                segmentId: `tts-${i}`,
+                text: sentences[i].trim(),
+                pageNumber: null,
+                textOffsetStart: null,
+                textOffsetEnd: null,
+                startTime: timing.start_time,
+                endTime: timing.end_time,
+              };
+              setCurrentSyncPosition(position);
+              
+              // Update progress
+              const progressPercent = totalDuration > 0 ? (timing.start_time / totalDuration) * 100 : 0;
+              updateReadingProgress({
+                book_id: bookIdRef.current,
+                page_number: 1,
+                progress_percent: Math.min(progressPercent, 100),
+              });
+              updateListeningProgress({
+                book_id: bookIdRef.current,
+                current_time: timing.start_time,
+                progress_percent: Math.min(progressPercent, 100),
+              });
+            }
+            break;
+          }
+        }
+      });
+
+      ttsEngine.setOnDone(() => {
+        setTtsIsPlaying(false);
+        useAudioStore.setState({ isPlaying: false });
+        stopSync();
+        setCurrentSyncPosition(null);
+        setTtsCurrentSentenceIndex(-1);
+      });
     }
-    const word = syncEngine.findCurrentWord(globalTime);
-    setCurrentWord(word);
-  }, [globalTime, useWordLevel, isPlaying]);
+  }, [content, useTTS, bookId]);
+
 
   // Auto-scroll to keep highlighted text visible
   useEffect(() => {
-    if (!isSyncing || !isPlaying || !currentSyncPosition) return;
+    if (!currentSyncPosition) return;
 
-    // Find the sentence index that matches the current sync position
     const sentences = content.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 0);
     const searchText = currentSyncPosition.text.trim().substring(0, 50).toLowerCase();
     
     for (let i = 0; i < sentences.length; i++) {
       if (sentences[i].toLowerCase().includes(searchText)) {
-        // Scroll to this sentence
         if (autoScrollTimerRef.current) {
           clearTimeout(autoScrollTimerRef.current);
         }
@@ -223,7 +298,7 @@ export default function SyncReaderScreen() {
           sentenceRefs.current[i]?.measureLayout(
             scrollViewRef.current?.getNode() as any,
             (x: number, y: number) => {
-              const scrollY = y - 100; // Keep highlighted text near top
+              const scrollY = y - 100;
               scrollViewRef.current?.scrollTo({ y: scrollY, animated: true });
             },
             () => {}
@@ -238,36 +313,17 @@ export default function SyncReaderScreen() {
         clearTimeout(autoScrollTimerRef.current);
       }
     };
-  }, [currentSyncPosition, isSyncing, isPlaying, content]);
-
-  // Auto-save progress every 5 seconds
-  useEffect(() => {
-    if (!isPlaying || !book) return;
-
-    const timer = setInterval(() => {
-      const progressPercent = totalDuration > 0 ? (globalTime / totalDuration) * 100 : 0;
-      
-      updateListeningProgress({
-        book_id: bookIdRef.current,
-        current_time: globalTime,
-        progress_percent: Math.min(progressPercent, 100),
-      });
-
-      updateReadingProgress({
-        book_id: bookIdRef.current,
-        page_number: currentPage,
-        progress_percent: Math.min(progressPercent, 100),
-      });
-    }, 5000);
-
-    return () => clearInterval(timer);
-  }, [isPlaying, book, bookIdRef.current, globalTime, currentPage, totalDuration, updateListeningProgress, updateReadingProgress]);
+  }, [currentSyncPosition, content]);
 
   // Fetch book data
   useEffect(() => {
     fetchBook();
     return () => {
-      pause();
+      if (useTTS) {
+        ttsEngine.stop();
+      } else {
+        audioPause();
+      }
       stopSync();
       reset();
       syncEngine.stop();
@@ -288,23 +344,23 @@ export default function SyncReaderScreen() {
 
       if (bookData) {
         setBook(bookData);
-        bookIdRef.current = bookId;
+        bookIdRef.current = bookId!;
 
         // Fetch audio segments
         const { data: segmentsData } = await supabase
           .from('audio_segments')
           .select('*')
-          .eq('book_id', bookId)
+          .eq('book_id', bookId!)
           .order('start_time', { ascending: true });
 
         if (segmentsData && segmentsData.length > 0) {
           setBookSegments(segmentsData);
 
-          // Resolve audio URIs — check for locally downloaded files first
+          // Resolve audio URIs
           const uris: string[] = [];
           for (let i = 0; i < segmentsData.length; i++) {
             const segment = segmentsData[i];
-            const localUri = await getAudioSegmentUri(bookId, i + 1, segment.audio_url);
+            const localUri = await getAudioSegmentUri(bookId!, i + 1, segment.audio_url);
             uris.push(localUri || segment.audio_url || '');
           }
           setResolvedAudioUris(uris);
@@ -319,29 +375,40 @@ export default function SyncReaderScreen() {
 
         if (alignData && alignData.length > 0) {
           setBookAlignments(alignData);
+          setUseTTS(false);
+        } else {
+          // No audio data — use TTS mode
+          setUseTTS(true);
         }
 
-        // Fetch document content
-        if (bookData.document_type === 'markdown' && bookData.document_url) {
+        // Fetch document content from book_chapters (for all formats)
+        const { data: chaptersData } = await supabase
+          .from('book_chapters')
+          .select('title, content, order_index')
+          .eq('book_id', bookId!)
+          .order('order_index', { ascending: true });
+
+        if (chaptersData && chaptersData.length > 0) {
+          // Combine all chapter contents into plain text
+          let fullText = '';
+          for (const chapter of chaptersData) {
+            const plainText = stripHtml(chapter.content || '');
+            if (plainText) {
+              fullText += `\n\n${chapter.title}\n\n${plainText}`;
+            }
+          }
+          setContent(fullText.trim());
+        } else if (bookData.document_type === 'markdown' && bookData.document_url) {
+          // Fallback: fetch Markdown directly
           try {
             const response = await fetch(bookData.document_url);
             const text = await response.text();
             setContent(text);
           } catch {
-            setContent('Unable to load document content.');
+            setContent(`"${bookData.title}" by ${bookData.author}\n\nNo content available for this book.`);
           }
-        } else if (bookData.document_type === 'pdf') {
-          setContent(
-            `"${bookData.title}" by ${bookData.author}\n\n` +
-            `PDF content will be displayed here with synchronized highlighting.\n\n` +
-            `The synchronized reader highlights the currently spoken text as audio plays.\n\n` +
-            `Features:\n` +
-            `• Sentence-level synchronization\n` +
-            `• Automatic scrolling to keep highlighted text visible\n` +
-            `• Tap to pause/resume\n` +
-            `• Playback speed control\n` +
-            `• Reading settings customization`
-          );
+        } else {
+          setContent(`"${bookData.title}" by ${bookData.author}\n\nNo content available for this book. The administrator needs to process this book for reflow reading.`);
         }
       }
     } catch {
@@ -350,44 +417,75 @@ export default function SyncReaderScreen() {
     setLoading(false);
   };
 
-  // Handle segment changes — seek to start of new segment
-  const lastSegmentIndexRef = useRef(0);
+  // Determine if playing (audio or TTS)
+  const isPlaying = useTTS ? ttsIsPlaying : audioIsPlaying;
+
+  // Update current word when global time changes and word-level is enabled
   useEffect(() => {
-    if (currentSegmentIndex !== lastSegmentIndexRef.current) {
-      lastSegmentIndexRef.current = currentSegmentIndex;
-      // Player will auto-load new segment URI
+    if (!useWordLevel || !isPlaying) {
+      setCurrentWord(null);
+      return;
     }
-  }, [currentSegmentIndex]);
+    const word = syncEngine.findCurrentWord(globalTime);
+    setCurrentWord(word);
+  }, [globalTime, useWordLevel, isPlaying]);
 
   const handlePlayPause = useCallback(() => {
-    if (bookSegments.length === 0 && bookAlignments.length === 0) return;
+    if (!content || content.startsWith('No content available')) return;
 
     if (isPlaying) {
-      pause();
-      stopSync();
-      syncEngine.stop();
+      if (useTTS) {
+        ttsEngine.pause();
+        setTtsIsPlaying(false);
+        stopSync();
+      } else {
+        audioPause();
+        stopSync();
+        syncEngine.stop();
+      }
     } else {
       startSync();
-      syncEngine.start();
-      play();
+      if (useTTS) {
+        // Start TTS from current position
+        const fromIndex = ttsCurrentSentenceIndex >= 0 ? ttsCurrentSentenceIndex + 1 : 0;
+        ttsEngine.configure({ rate: audioSettings.playbackSpeed });
+        ttsEngine.loadText(content);
+        ttsEngine.speak(fromIndex);
+        setTtsIsPlaying(true);
+        syncEngine.start();
+      } else {
+        syncEngine.start();
+        audioPlay();
+      }
     }
-  }, [isPlaying, play, pause, startSync, stopSync, bookSegments.length, bookAlignments.length]);
+  }, [isPlaying, useTTS, content, audioSettings.playbackSpeed, ttsCurrentSentenceIndex, startSync, stopSync, audioPlay, audioPause]);
 
   const handleSeek = (value: number) => {
-    if (bookSegments.length === 0) return;
-
-    // Map global time to segment-local time
-    let accumulatedTime = 0;
-    for (const seg of bookSegments) {
-      const segDuration = seg.end_time - seg.start_time;
-      if (value >= accumulatedTime && value < accumulatedTime + segDuration) {
-        const segIndex = bookSegments.indexOf(seg);
-        const localTime = value - accumulatedTime;
-        setGlobalTime(value);
-        seekTo(localTime);
-        return;
+    if (useTTS) {
+      // For TTS, find the sentence at this time and seek to it
+      const timing = ttsEstimatedTimings.find(t => value >= t.start_time && value < t.end_time);
+      if (timing) {
+        const sentences = content.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 0);
+        const index = ttsEstimatedTimings.indexOf(timing);
+        setTtsCurrentSentenceIndex(index);
+        ttsEngine.stop();
+        ttsEngine.loadText(content);
+        ttsEngine.speak(index);
+        setTtsIsPlaying(true);
       }
-      accumulatedTime += segDuration;
+    } else if (bookSegments.length > 0) {
+      // Audio mode: map global time to segment-local time
+      let accumulatedTime = 0;
+      for (const seg of bookSegments) {
+        const segDuration = seg.end_time - seg.start_time;
+        if (value >= accumulatedTime && value < accumulatedTime + segDuration) {
+          const localTime = value - accumulatedTime;
+          setGlobalTime(value);
+          audioSeekTo(localTime);
+          return;
+        }
+        accumulatedTime += segDuration;
+      }
     }
   };
 
@@ -395,38 +493,61 @@ export default function SyncReaderScreen() {
     const speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
     const currentIndex = speeds.indexOf(audioSettings.playbackSpeed);
     const nextSpeed = speeds[(currentIndex + 1) % speeds.length];
-    setPlaybackRate(nextSpeed);
     useSettingsStore.setState((s) => ({
       ...s,
       audioSettings: { ...s.audioSettings, playbackSpeed: nextSpeed },
     }));
+    
+    if (useTTS) {
+      ttsEngine.configure({ rate: nextSpeed });
+    } else {
+      audioSetPlaybackRate(nextSpeed);
+    }
   };
 
   const handleSkipForward = () => {
-    const newTime = Math.min(globalTime + 10, totalDuration);
-    handleSeek(newTime);
+    const sentences = content.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 0);
+    if (useTTS) {
+      const nextIndex = Math.min(ttsCurrentSentenceIndex + 1, sentences.length - 1);
+      setTtsCurrentSentenceIndex(nextIndex);
+      ttsEngine.stop();
+      ttsEngine.loadText(content);
+      ttsEngine.speak(nextIndex);
+    } else {
+      const newTime = Math.min(globalTime + 10, totalDuration);
+      handleSeek(newTime);
+    }
   };
 
   const handleSkipBackward = () => {
-    const newTime = Math.max(globalTime - 10, 0);
-    handleSeek(newTime);
+    if (useTTS) {
+      const prevIndex = Math.max(ttsCurrentSentenceIndex - 1, 0);
+      setTtsCurrentSentenceIndex(prevIndex);
+      ttsEngine.stop();
+      ttsEngine.loadText(content);
+      ttsEngine.speak(prevIndex);
+    } else {
+      const newTime = Math.max(globalTime - 10, 0);
+      handleSeek(newTime);
+    }
   };
 
-  // Lock-screen media controls and headphone integration
+  // Lock-screen media controls
   useMediaControls({
     title: book?.title || 'Unknown',
     artist: book?.author || 'Unknown',
     album: 'EODH Audiobooks',
     isPlaying,
-    onPlay: () => {
-      if (bookSegments.length > 0 || bookAlignments.length > 0) handlePlayPause();
-    },
+    onPlay: () => handlePlayPause(),
     onPause: () => handlePlayPause(),
     onNext: handleSkipForward,
     onPrevious: handleSkipBackward,
     onSeek: (position) => handleSeek(position),
     onStop: () => {
       handlePlayPause();
+      if (useTTS) {
+        setTtsCurrentSentenceIndex(-1);
+      }
       handleSeek(0);
     },
   });
@@ -441,8 +562,8 @@ export default function SyncReaderScreen() {
     switch (readingSettings.theme) {
       case 'dark':
         return { background: '#1a1a1a', text: '#e0e0e0', highlight: 'rgba(255, 201, 40, 0.3)' };
-      case 'sepia':
-        return { background: '#f4ecd8', text: '#5b4636', highlight: 'rgba(255, 201, 40, 0.2)' };
+      case 'system':
+        return { background: isDark ? '#1a1a1a' : '#FFFFFF', text: isDark ? '#e0e0e0' : '#1a1a1a', highlight: 'rgba(255, 201, 40, 0.3)' };
       default:
         return { background: '#FFFFFF', text: '#1a1a1a', highlight: 'rgba(255, 201, 40, 0.3)' };
     }
@@ -452,16 +573,16 @@ export default function SyncReaderScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={COLORS.royalPurple} />
+      <SafeAreaView style={[styles.loadingContainer, { backgroundColor: colors.background }]} edges={['left', 'right']}>
+        <ActivityIndicator size="large" color={colors.primary} />
       </SafeAreaView>
     );
   }
 
   if (!book) {
     return (
-      <SafeAreaView style={styles.emptyContainer}>
-        <Ionicons name="sync-circle-outline" size={64} color={COLORS.gray300} />
+      <SafeAreaView style={[styles.emptyContainer, { backgroundColor: colors.background }]} edges={['left', 'right']}>
+        <Ionicons name="sync-circle-outline" size={64} color={colors.textMuted} />
         <Text style={styles.emptyTitle}>Sync Not Available</Text>
         <Text style={styles.emptySubtitle}>This book does not have synchronized audio content.</Text>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
@@ -480,55 +601,60 @@ export default function SyncReaderScreen() {
     return new Map([[currentSyncPosition.text.trim(), currentWord.word]]);
   }, [useWordLevel, currentWord, currentSyncPosition]);
 
-  // Determine if sync is available
-  const hasSyncData = bookAlignments.length > 0 || bookSegments.length > 0;
+  // Determine if content is available
+  const hasContent = sentences.length > 0 && !content.startsWith('No content available');
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]}>
+    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['left', 'right']}>
       <StatusBar
         barStyle={readingSettings.theme === 'dark' ? 'light-content' : 'dark-content'}
       />
 
       {/* Header */}
       {showControls && (
-        <View style={[styles.header, { backgroundColor: themeColors.background }]}>
-          <TouchableOpacity onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color={themeColors.text} />
-          </TouchableOpacity>
-          <View style={styles.headerCenter}>
-            <Text style={[styles.headerTitle, { color: themeColors.text }]} numberOfLines={1}>
-              {book.title}
-            </Text>
-            {isSyncing && (
-              <View style={styles.syncBadge}>
-                <View style={styles.syncDot} />
-                <Text style={styles.syncText}>Sync Active</Text>
-              </View>
-            )}
-          </View>
-          <View style={styles.headerRight}>
-            <Text style={[styles.pageIndicator, { color: themeColors.text }]}>
-              Pg {currentPage}
-            </Text>
-            <TouchableOpacity onPress={() => setShowSettings(true)}>
-              <Ionicons name="settings-outline" size={22} color={themeColors.text} />
+        <AnimatedView fadeDelay={50} fadeDuration={300} slideDirection="down" slideDistance={20}>
+          <View style={[styles.header, { backgroundColor: themeColors.background, borderBottomColor: colors.border, paddingTop: insets.top + SPACING.sm }]}>
+            <TouchableOpacity onPress={() => router.back()}>
+              <Ionicons name="arrow-back" size={24} color={themeColors.text} />
             </TouchableOpacity>
+            <View style={styles.headerCenter}>
+              <Text style={[styles.headerTitle, { color: themeColors.text }]} numberOfLines={1}>
+                {book.title}
+              </Text>
+              {isSyncing && (
+                <View style={styles.syncBadge}>
+                  <View style={[styles.syncDot, { backgroundColor: useTTS ? '#4CAF50' : colors.primary }]} />
+                  <Text style={[styles.syncText, { color: useTTS ? '#4CAF50' : colors.primary }]}>
+                    {useTTS ? 'TTS Active' : 'Sync Active'}
+                  </Text>
+                </View>
+              )}
+            </View>
+            <View style={styles.headerRight}>
+              {useTTS && (
+                <Ionicons name="volume-high" size={18} color={themeColors.text} />
+              )}
+              <TouchableOpacity onPress={() => setShowSettings(true)}>
+                <Ionicons name="settings-outline" size={22} color={themeColors.text} />
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
+        </AnimatedView>
       )}
 
       {/* Content Area */}
-      <TouchableOpacity
-        style={styles.contentArea}
-        onPress={() => setShowControls(!showControls)}
-        activeOpacity={1}
-      >
+      <AnimatedView style={{ flex: 1 }} fadeDelay={200} fadeDuration={400} slideDirection="up" slideDistance={15}>
+        <TouchableOpacity
+          style={styles.contentArea}
+          onPress={() => setShowControls(!showControls)}
+          activeOpacity={1}
+        >
         <ScrollView
           ref={scrollViewRef}
           style={styles.scrollView}
           contentContainerStyle={[
             styles.scrollContent,
-            { paddingHorizontal: readingSettings.margins },
+            { paddingHorizontal: readingSettings.margins, paddingBottom: insets.bottom + SPACING.xxl + 20 },
           ]}
           showsVerticalScrollIndicator={false}
         >
@@ -586,10 +712,10 @@ export default function SyncReaderScreen() {
                       <Text
                         key={`w-${wIndex}`}
                         style={{
-                        color: isCurrentWord ? COLORS.gold : themeColors.text,
-                        fontWeight: isCurrentWord ? '700' : '400',
-                        fontSize: readingSettings.fontSize,
-                      }}
+                          color: isCurrentWord ? colors.primary : themeColors.text,
+                          fontWeight: isCurrentWord ? '700' : '400',
+                          fontSize: readingSettings.fontSize,
+                        }}
                       >
                         {word}
                       </Text>
@@ -605,29 +731,40 @@ export default function SyncReaderScreen() {
                 ref={(ref) => {
                   sentenceRefs.current[index] = ref;
                 }}
+                onPress={() => {
+                  if (useTTS) {
+                    // Tap to start TTS from this sentence
+                    setTtsCurrentSentenceIndex(index);
+                    ttsEngine.stop();
+                    ttsEngine.loadText(content);
+                    ttsEngine.speak(index);
+                    setTtsIsPlaying(true);
+                  }
+                }}
               >
                 {renderSentenceContent()}
               </TouchableOpacity>
             );
           })}
         </ScrollView>
-      </TouchableOpacity>
+        </TouchableOpacity>
+      </AnimatedView>
 
       {/* Bottom Controls */}
       {showControls && (
-        <View style={[styles.bottomControls, { backgroundColor: themeColors.background }]}>
+        <View style={[styles.bottomControls, { backgroundColor: themeColors.background, borderTopColor: colors.border }]}>
           {/* Progress Bar */}
           <View style={styles.progressRow}>
             <Text style={[styles.timeText, { color: themeColors.text }]}>
-              {formatTime(globalTime)}
+              {formatTime(useTTS ? (currentSyncPosition?.startTime || 0) : globalTime)}
             </Text>
             <View style={styles.progressBar}>
               <View
                 style={[
                   styles.progressFill,
                   {
-                    width: `${totalDuration > 0 ? (globalTime / totalDuration) * 100 : 0}%`,
-                    backgroundColor: COLORS.gold,
+                    width: `${totalDuration > 0 ? ((useTTS ? (currentSyncPosition?.startTime || 0) : globalTime) / totalDuration) * 100 : 0}%`,
+                    backgroundColor: useTTS ? '#4CAF50' : themeColors.highlight,
                   },
                 ]}
               />
@@ -656,12 +793,12 @@ export default function SyncReaderScreen() {
             <TouchableOpacity
               style={styles.playButton}
               onPress={handlePlayPause}
-              disabled={!hasSyncData}
+              disabled={!hasContent}
             >
               <Ionicons
                 name={isPlaying ? 'pause-circle' : 'play-circle'}
                 size={56}
-                color={!hasSyncData ? COLORS.gray400 : COLORS.gold}
+                color={!hasContent ? colors.textMuted : (useTTS ? '#4CAF50' : colors.primary)}
               />
             </TouchableOpacity>
 
@@ -683,22 +820,19 @@ export default function SyncReaderScreen() {
       {/* Buffering Indicator */}
       {isBuffering && (
         <View style={styles.bufferContainer}>
-          <ActivityIndicator size="small" color={COLORS.gold} />
+          <ActivityIndicator size="small" color={colors.primary} />
           <Text style={styles.bufferText}>Buffering...</Text>
         </View>
       )}
 
-      {/* No Sync Data Message */}
-      {!hasSyncData && !loading && (
+      {/* No Content Message */}
+      {!hasContent && !loading && (
         <View style={styles.noSyncOverlay}>
-          <Ionicons name="sync-outline" size={48} color={COLORS.gray400} />
-          <Text style={styles.noSyncTitle}>Synchronization Pending</Text>
+          <Ionicons name="book-outline" size={48} color={colors.textMuted} />
+          <Text style={styles.noSyncTitle}>No Content Available</Text>
           <Text style={styles.noSyncSubtitle}>
-            Synchronized reading requires audio alignment data. The administrator needs to upload
-            timing files (SRT/WebVTT) or generate TTS alignment for this book.
-          </Text>
-          <Text style={styles.noSyncNote}>
-            You can still read the book or listen to audio separately.
+            This book needs to be processed for read-along. The administrator can use the "Process All" button
+            in the admin dashboard to extract and structure the content.
           </Text>
         </View>
       )}
@@ -720,7 +854,7 @@ export default function SyncReaderScreen() {
             <View style={styles.settingRow}>
               <Text style={[styles.settingLabel, { color: themeColors.text }]}>Theme</Text>
               <View style={styles.themeButtons}>
-                {(['light', 'dark', 'sepia'] as const).map((theme) => (
+                {(['light', 'dark', 'system'] as const).map((theme) => (
                   <TouchableOpacity
                     key={theme}
                     style={[
@@ -736,7 +870,7 @@ export default function SyncReaderScreen() {
                         styles.themeButtonText,
                         {
                           color:
-                            theme === 'light' ? '#333' : theme === 'dark' ? '#fff' : '#5b4636',
+                            theme === 'light' ? '#333' : theme === 'dark' ? '#fff' : '#6B7280',
                         },
                         readingSettings.theme === theme && styles.themeButtonTextActive,
                       ]}
@@ -761,7 +895,7 @@ export default function SyncReaderScreen() {
                       })
                   }
                 >
-                  <Ionicons name="remove-circle" size={28} color={COLORS.royalPurple} />
+                  <Ionicons name="remove-circle" size={28} color={colors.primary} />
                 </TouchableOpacity>
                 <Text style={[styles.fontSizeValue, { color: themeColors.text }]}>
                   {readingSettings.fontSize}
@@ -775,7 +909,7 @@ export default function SyncReaderScreen() {
                       })
                   }
                 >
-                  <Ionicons name="add-circle" size={28} color={COLORS.royalPurple} />
+                  <Ionicons name="add-circle" size={28} color={colors.primary} />
                 </TouchableOpacity>
               </View>
             </View>
@@ -792,13 +926,11 @@ const styles = StyleSheet.create({
   },
   loadingContainer: {
     flex: 1,
-    backgroundColor: COLORS.lightBackground,
     alignItems: 'center',
     justifyContent: 'center',
   },
   emptyContainer: {
     flex: 1,
-    backgroundColor: COLORS.lightBackground,
     alignItems: 'center',
     justifyContent: 'center',
     padding: SPACING.xl,
@@ -806,12 +938,10 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: COLORS.gray600,
     marginTop: SPACING.md,
   },
   emptySubtitle: {
     fontSize: 14,
-    color: COLORS.gray400,
     textAlign: 'center',
     marginTop: SPACING.sm,
   },
@@ -819,11 +949,9 @@ const styles = StyleSheet.create({
     marginTop: SPACING.lg,
     paddingHorizontal: SPACING.lg,
     paddingVertical: SPACING.md,
-    backgroundColor: COLORS.royalPurple,
     borderRadius: BORDER_RADIUS.md,
   },
   backButtonText: {
-    color: COLORS.white,
     fontSize: 15,
     fontWeight: '600',
   },
@@ -833,7 +961,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.sm,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.gray200,
   },
   headerCenter: {
     flex: 1,
@@ -854,13 +981,13 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: COLORS.success,
     marginRight: 4,
+    backgroundColor: '#4CAF50',
   },
   syncText: {
     fontSize: 10,
-    color: COLORS.success,
     fontWeight: '500',
+    color: '#4CAF50',
   },
   headerRight: {
     flexDirection: 'row',
@@ -888,7 +1015,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.sm,
     borderTopWidth: 1,
-    borderTopColor: COLORS.gray200,
   },
   progressRow: {
     flexDirection: 'row',
@@ -904,7 +1030,6 @@ const styles = StyleSheet.create({
   progressBar: {
     flex: 1,
     height: 4,
-    backgroundColor: COLORS.gray200,
     borderRadius: 2,
     overflow: 'hidden',
   },
@@ -945,23 +1070,13 @@ const styles = StyleSheet.create({
   noSyncTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: COLORS.gray700,
     marginTop: SPACING.md,
     textAlign: 'center',
   },
   noSyncSubtitle: {
     fontSize: 13,
-    color: COLORS.gray500,
     textAlign: 'center',
     marginTop: SPACING.sm,
-    lineHeight: 18,
-  },
-  noSyncNote: {
-    fontSize: 12,
-    color: COLORS.gray400,
-    textAlign: 'center',
-    marginTop: SPACING.sm,
-    fontStyle: 'italic',
   },
   modalOverlay: {
     flex: 1,
@@ -1001,11 +1116,9 @@ const styles = StyleSheet.create({
     paddingVertical: SPACING.sm,
     borderRadius: BORDER_RADIUS.md,
     borderWidth: 1,
-    borderColor: COLORS.gray300,
     alignItems: 'center',
   },
   themeButtonActive: {
-    borderColor: COLORS.royalPurple,
     borderWidth: 2,
   },
   themeButtonText: {
@@ -1013,7 +1126,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   themeButtonTextActive: {
-    color: COLORS.royalPurple,
     fontWeight: '600',
   },
   fontSizeRow: {
@@ -1025,6 +1137,15 @@ const styles = StyleSheet.create({
   fontSizeValue: {
     fontSize: 18,
     fontWeight: '600',
+  },
+  bufferContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: SPACING.sm,
+  },
+  bufferText: {
+    fontSize: 13,
     minWidth: 40,
     textAlign: 'center',
   },

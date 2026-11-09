@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,7 +6,6 @@ import {
   ScrollView,
   TouchableOpacity,
   TextInput,
-  SafeAreaView,
   StatusBar,
   ActivityIndicator,
   Alert,
@@ -18,12 +17,17 @@ import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '@/lib/supabase/client';
 import { processDocument, ProcessingProgress } from '@/lib/admin/textProcessing';
 import { useToast } from '@/lib/notifications/toast';
-import { COLORS, SPACING, BORDER_RADIUS } from '@/constants/theme';
+import { useTheme } from '@/lib/theme/ThemeContext';
+import { SPACING, BORDER_RADIUS } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function AdminUploadScreen() {
   const router = useRouter();
   const { showSuccess, showError, showWarning } = useToast();
+  const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -38,15 +42,20 @@ export default function AdminUploadScreen() {
   const [category, setCategory] = useState('');
   const [language, setLanguage] = useState('en');
   const [publicationDate, setPublicationDate] = useState('');
-  const [documentType, setDocumentType] = useState<'pdf' | 'markdown'>('pdf');
+  const [documentType, setDocumentType] = useState<'pdf' | 'markdown' | 'epub' | 'docx'>('pdf');
 
   // File state
-  const [documentFile, setDocumentFile] = useState<DocumentPicker.DocumentPickerResult | null>(null);
+  const [documentFile, setDocumentFile] = useState<any>(null);
   const [coverImage, setCoverImage] = useState<string | null>(null);
-  const [audioFile, setAudioFile] = useState<DocumentPicker.DocumentPickerResult | null>(null);
+  const [audioFile, setAudioFile] = useState<any>(null);
 
   // Categories
   const [categories, setCategories] = useState<any[]>([]);
+
+  // Load categories on mount
+  useEffect(() => {
+    loadCategories();
+  }, []);
 
   // Load categories
   const loadCategories = async () => {
@@ -64,8 +73,15 @@ export default function AdminUploadScreen() {
   // Pick document file
   const pickDocument = async () => {
     try {
+      const mimeTypes: Record<string, string | string[]> = {
+        pdf: 'application/pdf',
+        markdown: ['text/markdown', 'text/x-markdown', '.md', '.markdown'],
+        epub: 'application/epub+zip',
+        docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      };
+
       const result = await DocumentPicker.getDocumentAsync({
-        type: documentType === 'pdf' ? 'application/pdf' : ['text/markdown', 'text/x-markdown', '.md', '.markdown'],
+        type: mimeTypes[documentType] || ['application/pdf', 'application/epub+zip', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/markdown'],
         copyToCacheDirectory: true,
       });
 
@@ -115,7 +131,7 @@ export default function AdminUploadScreen() {
   const validateForm = (): string | null => {
     if (!title.trim()) return 'Please enter a book title.';
     if (!author.trim()) return 'Please enter the author name.';
-    if (!documentFile) return 'Please select a document file (PDF or Markdown).';
+    if (!documentFile) return 'Please select a document file (PDF, EPUB, DOCX, or Markdown).';
     return null;
   };
 
@@ -176,14 +192,18 @@ export default function AdminUploadScreen() {
         setUploadProgress(25);
       }
 
-      // Upload document
+      // Upload document to format-specific subdirectory
       setUploadProgress(30);
+      const documentMimeType = documentFile!.mimeType || 
+        (documentType === 'pdf' ? 'application/pdf' :
+         documentType === 'epub' ? 'application/epub+zip' :
+         documentType === 'docx' ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' :
+         'text/markdown');
       const documentUrl = await uploadFile(
         'documents',
-        documentFile!.assets![0].uri,
-        documentFile!.assets![0].name,
-        documentFile!.assets![0].mimeType || 
-          (documentType === 'pdf' ? 'application/pdf' : 'text/markdown')
+        documentFile!.uri,
+        `${documentType}/${documentFile!.name}`,
+        documentMimeType
       );
       setUploadProgress(60);
 
@@ -191,35 +211,8 @@ export default function AdminUploadScreen() {
         throw new Error('Failed to upload document.');
       }
 
-      // Upload audio if available
-      let hasAudio = false;
-      let audioType: 'tts' | 'prerecorded' | null = null;
-      if (audioFile) {
-        setUploadProgress(65);
-        const audioUrl = await uploadFile(
-          'audiobooks',
-          audioFile.assets![0].uri,
-          audioFile.assets![0].name,
-          audioFile.assets![0].mimeType || 'audio/mpeg'
-        );
-        setUploadProgress(80);
-        
-        if (audioUrl) {
-          hasAudio = true;
-          audioType = 'prerecorded';
-          
-          // Create audio book record
-          await supabase.from('audio_books').insert({
-            book_id: 'temp', // Will update after book creation
-            audio_url: audioUrl,
-            audio_type: 'prerecorded',
-            is_active: true,
-          });
-        }
-      }
-
-      // Create book record
-      setUploadProgress(85);
+      // Create book record first (needed for audio_books foreign key)
+      setUploadProgress(60);
       const { data: book, error: bookError } = await supabase
         .from('books')
         .insert({
@@ -230,17 +223,52 @@ export default function AdminUploadScreen() {
           cover_url: coverUrl,
           document_url: documentUrl,
           document_type: documentType,
-          file_size: documentFile.assets![0].size,
+          file_size: (documentFile as any)?.size || 0,
           language: language,
           publication_date: publicationDate || null,
-          is_published: false,
-          has_audio: hasAudio,
-          audio_type: audioType,
+          is_published: true,
+          has_audio: false,
+          audio_type: null,
+          processing_status: 'pending',
+          content_format: 'reflow',
         })
         .select()
         .single();
 
       if (bookError) throw bookError;
+
+      // Upload audio if available (after book creation so we have the UUID)
+      let hasAudio = false;
+      let audioType: 'tts' | 'prerecorded' | null = null;
+      if (audioFile) {
+        setUploadProgress(65);
+        const audioUrl = await uploadFile(
+          'audiobooks',
+          audioFile.uri,
+          audioFile.name,
+          audioFile.mimeType || 'audio/mpeg'
+        );
+        setUploadProgress(80);
+
+        if (audioUrl) {
+          hasAudio = true;
+          audioType = 'prerecorded';
+
+          // Create audio book record with the real book UUID
+          await supabase.from('audio_books').insert({
+            book_id: book.id,
+            audio_url: audioUrl,
+            audio_type: 'prerecorded',
+            is_active: true,
+          });
+
+          // Update book with audio info
+          await supabase
+            .from('books')
+            .update({ has_audio: true, audio_type: 'prerecorded' })
+            .eq('id', book.id);
+        }
+      }
 
       setUploadProgress(100);
 
@@ -337,71 +365,64 @@ export default function AdminUploadScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" />
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['left', 'right']}>
+      <StatusBar barStyle={colors.statusBar} />
       
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + SPACING.md, backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
         <TouchableOpacity onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color={COLORS.deepNavy} />
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Upload Book</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Upload Book</Text>
         <View style={{ width: 24 }} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + SPACING.xxl + 20 }]} showsVerticalScrollIndicator={false}>
         {/* Document Type */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Document Type</Text>
-          <View style={styles.typeSelector}>
+        <View style={[styles.section, { backgroundColor: colors.card, shadowColor: colors.cardShadow }]}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Document Type</Text>
+          <View style={styles.typeSelectorRow}>
             <TouchableOpacity
-              style={[styles.typeButton, documentType === 'pdf' && styles.typeButtonActive]}
-              onPress={() => setDocumentType('pdf')}
+              style={[styles.typeButtonSmall, { borderColor: colors.border }, documentType === 'pdf' && { backgroundColor: colors.primary, borderColor: colors.primary }]}
+              onPress={() => { setDocumentType('pdf'); setDocumentFile(null); }}
             >
-              <Ionicons
-                name="document-text"
-                size={24}
-                color={documentType === 'pdf' ? COLORS.white : COLORS.royalPurple}
-              />
-              <Text
-                style={[
-                  styles.typeButtonText,
-                  documentType === 'pdf' && styles.typeButtonTextActive,
-                ]}
-              >
-                PDF
-              </Text>
+              <Ionicons name="document-text" size={20} color={documentType === 'pdf' ? '#FFFFFF' : colors.primary} />
+              <Text style={[styles.typeButtonTextSmall, { color: colors.textSecondary }, documentType === 'pdf' && { color: '#FFFFFF' }]}>PDF</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.typeButton, documentType === 'markdown' && styles.typeButtonActive]}
-              onPress={() => setDocumentType('markdown')}
+              style={[styles.typeButtonSmall, { borderColor: colors.border }, documentType === 'epub' && { backgroundColor: colors.primary, borderColor: colors.primary }]}
+              onPress={() => { setDocumentType('epub'); setDocumentFile(null); }}
             >
-              <Ionicons
-                name="code-slash"
-                size={24}
-                color={documentType === 'markdown' ? COLORS.white : COLORS.royalPurple}
-              />
-              <Text
-                style={[
-                  styles.typeButtonText,
-                  documentType === 'markdown' && styles.typeButtonTextActive,
-                ]}
-              >
-                Markdown
-              </Text>
+              <Ionicons name="book" size={20} color={documentType === 'epub' ? '#FFFFFF' : colors.primary} />
+              <Text style={[styles.typeButtonTextSmall, { color: colors.textSecondary }, documentType === 'epub' && { color: '#FFFFFF' }]}>EPUB</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.typeButtonSmall, { borderColor: colors.border }, documentType === 'docx' && { backgroundColor: colors.primary, borderColor: colors.primary }]}
+              onPress={() => { setDocumentType('docx'); setDocumentFile(null); }}
+            >
+              <Ionicons name="document" size={20} color={documentType === 'docx' ? '#FFFFFF' : colors.primary} />
+              <Text style={[styles.typeButtonTextSmall, { color: colors.textSecondary }, documentType === 'docx' && { color: '#FFFFFF' }]}>DOCX</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.typeButtonSmall, { borderColor: colors.border }, documentType === 'markdown' && { backgroundColor: colors.primary, borderColor: colors.primary }]}
+              onPress={() => { setDocumentType('markdown'); setDocumentFile(null); }}
+            >
+              <Ionicons name="code-slash" size={20} color={documentType === 'markdown' ? '#FFFFFF' : colors.primary} />
+              <Text style={[styles.typeButtonTextSmall, { color: colors.textSecondary }, documentType === 'markdown' && { color: '#FFFFFF' }]}>MD</Text>
             </TouchableOpacity>
           </View>
         </View>
 
         {/* Book Information */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Book Information</Text>
+        <View style={[styles.section, { backgroundColor: colors.card, shadowColor: colors.cardShadow }]}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Book Information</Text>
           
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Title *</Text>
+            <Text style={[styles.label, { color: colors.text }]}>Title *</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
               placeholder="Enter book title"
+              placeholderTextColor={colors.textMuted}
               value={title}
               onChangeText={setTitle}
               editable={!uploading}
@@ -409,10 +430,11 @@ export default function AdminUploadScreen() {
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Author *</Text>
+            <Text style={[styles.label, { color: colors.text }]}>Author *</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
               placeholder="Enter author name"
+              placeholderTextColor={colors.textMuted}
               value={author}
               onChangeText={setAuthor}
               editable={!uploading}
@@ -420,10 +442,11 @@ export default function AdminUploadScreen() {
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Description</Text>
+            <Text style={[styles.label, { color: colors.text }]}>Description</Text>
             <TextInput
-              style={[styles.input, styles.textArea]}
+              style={[styles.input, styles.textArea, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
               placeholder="Enter book description"
+              placeholderTextColor={colors.textMuted}
               value={description}
               onChangeText={setDescription}
               multiline
@@ -434,35 +457,37 @@ export default function AdminUploadScreen() {
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Category</Text>
+            <Text style={[styles.label, { color: colors.text }]}>Category</Text>
             <TouchableOpacity
-              style={[styles.input, styles.selectInput]}
+              style={[styles.input, styles.selectInput, { backgroundColor: colors.surface, borderColor: colors.border }]}
               onPress={() => setShowCategoryModal(true)}
               disabled={uploading}
             >
-              <Text style={category ? styles.selectText : styles.selectPlaceholder}>
-                {category || 'Select a category'}
+              <Text style={[category ? styles.selectText : styles.selectPlaceholder, { color: category ? colors.text : colors.textMuted }]}>
+                {categories.find(c => c.id === category)?.name || 'Select a category'}
               </Text>
-              <Ionicons name="chevron-down" size={20} color={COLORS.gray400} />
+              <Ionicons name="chevron-down" size={20} color={colors.textMuted} />
             </TouchableOpacity>
           </View>
 
           <View style={styles.row}>
             <View style={[styles.inputGroup, { flex: 1 }]}>
-              <Text style={styles.label}>Language</Text>
+              <Text style={[styles.label, { color: colors.text }]}>Language</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
                 placeholder="en"
+                placeholderTextColor={colors.textMuted}
                 value={language}
                 onChangeText={setLanguage}
                 editable={!uploading}
               />
             </View>
             <View style={[styles.inputGroup, { flex: 1 }]}>
-              <Text style={styles.label}>Publication Date</Text>
+              <Text style={[styles.label, { color: colors.text }]}>Publication Date</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.border }]}
                 placeholder="YYYY-MM-DD"
+                placeholderTextColor={colors.textMuted}
                 value={publicationDate}
                 onChangeText={setPublicationDate}
                 editable={!uploading}
@@ -472,92 +497,92 @@ export default function AdminUploadScreen() {
         </View>
 
         {/* Files */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Files</Text>
+        <View style={[styles.section, { backgroundColor: colors.card, shadowColor: colors.cardShadow }]}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Files</Text>
 
           {/* Cover Image */}
           <TouchableOpacity
-            style={styles.filePicker}
+            style={[styles.filePicker, { backgroundColor: colors.surface, borderColor: colors.border }]}
             onPress={pickCoverImage}
             disabled={uploading}
           >
-            <Ionicons name="image-outline" size={24} color={COLORS.royalPurple} />
+            <Ionicons name="image-outline" size={24} color={colors.primary} />
             <View style={styles.filePickerInfo}>
-              <Text style={styles.filePickerTitle}>Cover Image</Text>
-              <Text style={styles.filePickerSubtitle}>
+              <Text style={[styles.filePickerTitle, { color: colors.text }]}>Cover Image</Text>
+              <Text style={[styles.filePickerSubtitle, { color: colors.textSecondary }]}>
                 {coverImage ? 'Image selected' : 'Optional: Select a cover image'}
               </Text>
             </View>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+            <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
           </TouchableOpacity>
 
           {/* Document */}
           <TouchableOpacity
-            style={styles.filePicker}
+            style={[styles.filePicker, { backgroundColor: colors.surface, borderColor: colors.border }]}
             onPress={pickDocument}
             disabled={uploading}
           >
-            <Ionicons name="document-text-outline" size={24} color={COLORS.royalPurple} />
+            <Ionicons name="document-text-outline" size={24} color={colors.primary} />
             <View style={styles.filePickerInfo}>
-              <Text style={styles.filePickerTitle}>Document File *</Text>
-              <Text style={styles.filePickerSubtitle}>
-                {documentFile?.assets?.[0]?.name || `Select a ${documentType.toUpperCase()} file`}
+              <Text style={[styles.filePickerTitle, { color: colors.text }]}>Document File *</Text>
+              <Text style={[styles.filePickerSubtitle, { color: colors.textSecondary }]}>
+                {documentFile?.name || `Select a ${documentType.toUpperCase()} file`}
               </Text>
             </View>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+            <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
           </TouchableOpacity>
 
           {/* Audio */}
           <TouchableOpacity
-            style={styles.filePicker}
+            style={[styles.filePicker, { backgroundColor: colors.surface, borderColor: colors.border }]}
             onPress={pickAudio}
             disabled={uploading}
           >
-            <Ionicons name="musical-notes-outline" size={24} color={COLORS.royalPurple} />
+            <Ionicons name="musical-notes-outline" size={24} color={colors.primary} />
             <View style={styles.filePickerInfo}>
-              <Text style={styles.filePickerTitle}>Audio File</Text>
-              <Text style={styles.filePickerSubtitle}>
-                {audioFile?.assets?.[0]?.name || 'Optional: Upload prerecorded audio'}
+              <Text style={[styles.filePickerTitle, { color: colors.text }]}>Audio File</Text>
+              <Text style={[styles.filePickerSubtitle, { color: colors.textSecondary }]}>
+                {audioFile?.name || 'Optional: Upload prerecorded audio'}
               </Text>
             </View>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+            <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
           </TouchableOpacity>
         </View>
 
         {/* Upload Progress */}
         {uploading && (
-          <View style={styles.progressContainer}>
-            <View style={styles.progressBar}>
+          <View style={[styles.progressContainer, { backgroundColor: colors.card }]}>
+            <View style={[styles.progressBar, { backgroundColor: colors.border }]}>
               <View
                 style={[
                   styles.progressFill,
-                  { width: `${uploadProgress}%` },
+                  { width: `${uploadProgress}%`, backgroundColor: colors.primary },
                 ]}
               />
             </View>
-            <Text style={styles.progressText}>{uploadProgress}%</Text>
+            <Text style={[styles.progressText, { color: colors.textSecondary }]}>{uploadProgress}%</Text>
           </View>
         )}
 
         {/* Processing Progress */}
         {processing && (
-          <View style={styles.progressContainer}>
-            <ActivityIndicator size="small" color={COLORS.royalPurple} style={{ marginBottom: SPACING.sm }} />
-            <Text style={styles.progressText}>{processingStage}</Text>
+          <View style={[styles.progressContainer, { backgroundColor: colors.card }]}>
+            <ActivityIndicator size="small" color={colors.primary} style={{ marginBottom: SPACING.sm }} />
+            <Text style={[styles.progressText, { color: colors.textSecondary }]}>{processingStage}</Text>
           </View>
         )}
 
         {/* Upload Button */}
         <TouchableOpacity
-          style={[styles.uploadButton, uploading && styles.uploadButtonDisabled]}
+          style={[styles.uploadButton, { backgroundColor: colors.primary }, uploading && { backgroundColor: colors.primary + '80' }]}
           onPress={handleUpload}
           disabled={uploading}
         >
           {uploading ? (
-            <ActivityIndicator color={COLORS.white} />
+            <ActivityIndicator color="#FFFFFF" />
           ) : (
             <>
-              <Ionicons name="cloud-upload" size={20} color={COLORS.white} />
+              <Ionicons name="cloud-upload" size={20} color="#FFFFFF" />
               <Text style={styles.uploadButtonText}>Upload Book</Text>
             </>
           )}
@@ -570,31 +595,31 @@ export default function AdminUploadScreen() {
       {/* Category Modal */}
       <Modal visible={showCategoryModal} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+          <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Select Category</Text>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>Select Category</Text>
               <TouchableOpacity onPress={() => setShowCategoryModal(false)}>
-                <Ionicons name="close" size={24} color={COLORS.deepNavy} />
+                <Ionicons name="close" size={24} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
             <ScrollView>
               {categories.map((cat) => (
                 <TouchableOpacity
                   key={cat.id}
-                  style={styles.categoryItem}
+                  style={[styles.categoryItem, { borderBottomColor: colors.border }]}
                   onPress={() => {
-                    setCategory(cat.name);
-                    setShowCategoryModal(false);
-                  }}
+                     setCategory(cat.id);
+                     setShowCategoryModal(false);
+                   }}
                 >
-                  <Text style={styles.categoryText}>{cat.name}</Text>
-                  {category === cat.name && (
-                    <Ionicons name="checkmark" size={20} color={COLORS.royalPurple} />
+                  <Text style={[styles.categoryText, { color: colors.text }]}>{cat.name}</Text>
+                  {category === cat.id && (
+                    <Ionicons name="checkmark" size={20} color={colors.primary} />
                   )}
                 </TouchableOpacity>
               ))}
               {categories.length === 0 && (
-                <Text style={styles.emptyText}>No categories available.</Text>
+                <Text style={[styles.emptyText, { color: colors.textMuted }]}>No categories available.</Text>
               )}
             </ScrollView>
           </View>
@@ -607,34 +632,28 @@ export default function AdminUploadScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.lightBackground,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.md,
+    paddingBottom: SPACING.sm,
     gap: SPACING.md,
-    backgroundColor: COLORS.white,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.gray200,
   },
   headerTitle: {
     flex: 1,
     fontSize: 20,
     fontWeight: '600',
-    color: COLORS.deepNavy,
     textAlign: 'center',
   },
   content: {
     padding: SPACING.md,
   },
   section: {
-    backgroundColor: COLORS.white,
     borderRadius: BORDER_RADIUS.md,
     padding: SPACING.md,
     marginBottom: SPACING.md,
-    shadowColor: COLORS.deepNavy,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 8,
@@ -643,12 +662,16 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: COLORS.deepNavy,
     marginBottom: SPACING.md,
   },
   typeSelector: {
     flexDirection: 'row',
     gap: SPACING.md,
+  },
+  typeSelectorRow: {
+    flexDirection: 'row',
+    gap: SPACING.sm,
+    flexWrap: 'wrap',
   },
   typeButton: {
     flex: 1,
@@ -658,20 +681,32 @@ const styles = StyleSheet.create({
     paddingVertical: SPACING.md,
     borderRadius: BORDER_RADIUS.md,
     borderWidth: 2,
-    borderColor: COLORS.gray200,
     gap: SPACING.sm,
   },
+  typeButtonSmall: {
+    flex: 1,
+    minWidth: '22%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: SPACING.sm,
+    paddingHorizontal: SPACING.sm,
+    borderRadius: BORDER_RADIUS.md,
+    borderWidth: 2,
+    gap: SPACING.xs,
+  },
   typeButtonActive: {
-    backgroundColor: COLORS.royalPurple,
-    borderColor: COLORS.royalPurple,
   },
   typeButtonText: {
     fontSize: 15,
     fontWeight: '600',
-    color: COLORS.royalPurple,
+  },
+  typeButtonTextSmall: {
+    fontSize: 13,
+    fontWeight: '600',
   },
   typeButtonTextActive: {
-    color: COLORS.white,
+    color: '#FFFFFF',
   },
   inputGroup: {
     marginBottom: SPACING.md,
@@ -679,18 +714,14 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 13,
     fontWeight: '500',
-    color: COLORS.deepNavy,
     marginBottom: SPACING.xs,
   },
   input: {
-    backgroundColor: COLORS.gray100,
     borderRadius: BORDER_RADIUS.md,
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.sm,
     fontSize: 15,
-    color: COLORS.deepNavy,
     borderWidth: 1,
-    borderColor: COLORS.gray200,
   },
   textArea: {
     height: 100,
@@ -703,12 +734,10 @@ const styles = StyleSheet.create({
   },
   selectText: {
     fontSize: 15,
-    color: COLORS.deepNavy,
     flex: 1,
   },
   selectPlaceholder: {
     fontSize: 15,
-    color: COLORS.gray400,
     flex: 1,
   },
   row: {
@@ -720,7 +749,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: SPACING.md,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.gray100,
     gap: SPACING.md,
   },
   filePickerInfo: {
@@ -729,15 +757,12 @@ const styles = StyleSheet.create({
   filePickerTitle: {
     fontSize: 15,
     fontWeight: '500',
-    color: COLORS.deepNavy,
   },
   filePickerSubtitle: {
     fontSize: 12,
-    color: COLORS.gray500,
     marginTop: 2,
   },
   progressContainer: {
-    backgroundColor: COLORS.white,
     borderRadius: BORDER_RADIUS.md,
     padding: SPACING.md,
     marginBottom: SPACING.md,
@@ -746,24 +771,20 @@ const styles = StyleSheet.create({
   progressBar: {
     width: '100%',
     height: 8,
-    backgroundColor: COLORS.gray200,
     borderRadius: 4,
     overflow: 'hidden',
     marginBottom: SPACING.sm,
   },
   progressFill: {
     height: '100%',
-    backgroundColor: COLORS.royalPurple,
     borderRadius: 4,
   },
   progressText: {
     fontSize: 14,
     fontWeight: '500',
-    color: COLORS.deepNavy,
   },
   uploadButton: {
     flexDirection: 'row',
-    backgroundColor: COLORS.royalPurple,
     borderRadius: BORDER_RADIUS.md,
     paddingVertical: SPACING.md,
     alignItems: 'center',
@@ -777,7 +798,7 @@ const styles = StyleSheet.create({
   uploadButtonText: {
     fontSize: 16,
     fontWeight: '600',
-    color: COLORS.white,
+    color: '#FFFFFF',
   },
   modalOverlay: {
     flex: 1,
@@ -785,7 +806,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.5)',
   },
   modalContent: {
-    backgroundColor: COLORS.white,
     borderTopLeftRadius: BORDER_RADIUS.lg,
     borderTopRightRadius: BORDER_RADIUS.lg,
     padding: SPACING.lg,
@@ -800,7 +820,6 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: COLORS.deepNavy,
   },
   categoryItem: {
     flexDirection: 'row',
@@ -808,15 +827,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: SPACING.md,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.gray100,
   },
   categoryText: {
     fontSize: 15,
-    color: COLORS.deepNavy,
   },
   emptyText: {
     fontSize: 14,
-    color: COLORS.gray400,
     textAlign: 'center',
     paddingVertical: SPACING.lg,
   },
