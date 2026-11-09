@@ -569,7 +569,7 @@ export default function SyncReaderScreen() {
     }
   };
 
-  const themeColors = getThemeColors();
+  const themeColors = useMemo(() => getThemeColors(), [readingSettings.theme, isDark]);
 
   if (loading) {
     return (
@@ -592,8 +592,22 @@ export default function SyncReaderScreen() {
     );
   }
 
-  // Split content into sentences for highlighting
-  const sentences = content.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 0);
+  // Split content into sentences for highlighting (memoized to avoid re-splitting on every render)
+  const sentences = useMemo(() => content.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 0), [content]);
+
+  // Build a set of highlighted sentence indices (memoized to avoid per-render string search)
+  const highlightedSentenceIndices = useMemo(() => {
+    const indices = new Set<number>();
+    if (!currentSyncPosition || sentences.length === 0) return indices;
+    const searchText = currentSyncPosition.text.trim().substring(0, 50).toLowerCase();
+    if (!searchText) return indices;
+    for (let i = 0; i < sentences.length; i++) {
+      if (sentences[i].toLowerCase().includes(searchText)) {
+        indices.add(i);
+      }
+    }
+    return indices;
+  }, [currentSyncPosition, sentences]);
 
   // Build a map of sentence text to current word for word-level highlighting
   const highlightedWordMap = useMemo(() => {
@@ -659,8 +673,7 @@ export default function SyncReaderScreen() {
           showsVerticalScrollIndicator={false}
         >
           {sentences.map((sentence, index) => {
-            const searchText = currentSyncPosition?.text.trim().substring(0, 50).toLowerCase() || '';
-            const isHighlighted = sentence.toLowerCase().includes(searchText);
+            const isHighlighted = highlightedSentenceIndices.has(index);
             const sentenceTrimmed = sentence.trim();
             
             // For word-level highlighting, split the sentence into words
