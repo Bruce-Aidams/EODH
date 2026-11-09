@@ -22,10 +22,6 @@ interface SearchResult {
   book_title: string;
   book_author: string;
   book_cover_url: string | null;
-  chapter_id: string | null;
-  chapter_title: string;
-  snippet: string;
-  rank: number;
 }
 
 // Simple LRU cache for search results
@@ -102,67 +98,35 @@ export default function GlobalSearchScreen() {
     setHasSearched(true);
 
     try {
-      // Use the optimized full-text search RPC function
-      // This uses GIN indexes and websearch_to_tsquery for fast keyword search
+      // Search books by title and author only
       const { data, error } = await supabase
-        .rpc('search_all_books', {
-          p_query: trimmed,
-          p_limit: 50,
-        })
+        .from('books')
+        .select('id, title, author, cover_url')
+        .ilike('title', `%${trimmed}%`)
+        .or(`author.ilike.%${trimmed}%`)
         .limit(50);
 
       if (abortControllerRef.current?.signal.aborted) return;
 
       if (error) {
-        console.error('Search RPC error:', error);
-        // Fallback: try searching books by title/author only if RPC fails
-        const { data: fallbackData, error: fallbackError } = await supabase
-          .from('books')
-          .select('id, title, author, cover_url')
-          .ilike('title', `%${trimmed}%`)
-          .or(`author.ilike.%${trimmed}%`)
-          .limit(20);
-
-        if (abortControllerRef.current?.signal.aborted) return;
-
-        if (!fallbackError && fallbackData) {
-          const fallbackResults: SearchResult[] = fallbackData.map((book: any) => ({
-            book_id: book.id,
-            book_title: book.title,
-            book_author: book.author,
-            book_cover_url: book.cover_url || null,
-            chapter_id: null,
-            chapter_title: book.title,
-            snippet: `${book.title} by ${book.author}`,
-            rank: 0,
-          }));
-          setResults(fallbackResults);
-          searchCache.set(trimmed, fallbackResults);
-        }
+        console.error('Search error:', error);
         return;
       }
 
       if (data) {
-        const searchResults: SearchResult[] = data.map((item: any) => ({
-          book_id: item.book_id || '',
-          book_title: item.book_title || '',
-          book_author: item.book_author || '',
-          book_cover_url: item.book_cover_url || null,
-          chapter_id: item.chapter_id || null,
-          chapter_title: item.chapter_title || '',
-          snippet: item.snippet || '',
-          rank: item.rank || 0,
+        const searchResults: SearchResult[] = data.map((book: any) => ({
+          book_id: book.id,
+          book_title: book.title,
+          book_author: book.author,
+          book_cover_url: book.cover_url || null,
         }));
-
-        // Sort by rank (relevance)
-        searchResults.sort((a, b) => b.rank - a.rank);
 
         setResults(searchResults);
         searchCache.set(trimmed, searchResults);
       }
     } catch (err: any) {
       if (err.name === 'AbortError') return;
-      console.error('Global search error:', err);
+      console.error('Search error:', err);
     } finally {
       if (abortControllerRef.current && !abortControllerRef.current.signal.aborted) {
         setIsSearching(false);
@@ -212,21 +176,6 @@ export default function GlobalSearchScreen() {
     router.push(`/book/${bookId}/reader`);
   };
 
-  // Clean snippet: remove HTML tags from ts_headline output
-  const cleanSnippet = (snippet: string): string => {
-    if (!snippet) return '';
-    return snippet
-      .replace(/<mark>/gi, '')
-      .replace(/<\/mark>/gi, '')
-      .replace(/<[^>]+>/g, '')
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-      .trim();
-  };
-
   const renderResult = ({ item }: { item: SearchResult }) => (
     <TouchableOpacity
       style={[styles.resultItem, { borderBottomColor: colors.border }]}
@@ -242,19 +191,6 @@ export default function GlobalSearchScreen() {
           {item.book_author}
         </Text>
       </View>
-      {item.chapter_id && (
-        <View style={styles.chapterInfo}>
-          <Ionicons name="document-text" size={16} color={colors.textMuted} />
-          <Text style={[styles.chapterTitle, { color: colors.textSecondary }]} numberOfLines={1}>
-            {item.chapter_title}
-          </Text>
-        </View>
-      )}
-      {item.snippet ? (
-        <Text style={[styles.snippet, { color: colors.textMuted }]} numberOfLines={3}>
-          {cleanSnippet(item.snippet)}
-        </Text>
-      ) : null}
     </TouchableOpacity>
   );
 
@@ -267,7 +203,7 @@ export default function GlobalSearchScreen() {
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Search All Books</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Search Books</Text>
         <View style={{ width: 24 }} />
       </View>
 
@@ -277,7 +213,7 @@ export default function GlobalSearchScreen() {
           value={query}
           onChangeText={setQuery}
           onSearch={() => performSearch(query)}
-          placeholder="Search titles, authors, content..."
+          placeholder="Search by title or author..."
         />
       </View>
 
@@ -293,7 +229,7 @@ export default function GlobalSearchScreen() {
         <FlatList
           data={results}
           renderItem={renderResult}
-          keyExtractor={(item) => `${item.book_id}-${item.chapter_id || 'meta'}`}
+          keyExtractor={(item) => item.book_id}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           initialNumToRender={10}
@@ -318,7 +254,7 @@ export default function GlobalSearchScreen() {
             Search your library
           </Text>
           <Text style={[styles.emptySubtitle, { color: colors.textMuted }]}>
-            Find books by title, author, or content
+            Find books by title or author
           </Text>
         </View>
       )}
@@ -370,21 +306,6 @@ const styles = StyleSheet.create({
   authorText: {
     fontSize: FONT_SIZE.sm,
     marginLeft: SPACING.sm,
-  },
-  chapterInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: SPACING.xs,
-  },
-  chapterTitle: {
-    fontSize: FONT_SIZE.sm,
-    marginLeft: SPACING.xs,
-    flex: 1,
-  },
-  snippet: {
-    fontSize: FONT_SIZE.sm,
-    lineHeight: 20,
-    marginLeft: 24,
   },
   loadingContainer: {
     flex: 1,

@@ -39,8 +39,10 @@ export function useCompleteAudioPlayer(
   initialRate: number = 1.0,
   callbacks: AudioPlayerCallbacks = {}
 ) {
-  const player = uri ? useAudioPlayer({ uri }) : null;
-  const status = player ? useAudioPlayerStatus(player) : null;
+  // Hooks MUST be called unconditionally (Rules of Hooks).
+  // Pass null when no URI is available — the player handles null gracefully.
+  const player = useAudioPlayer(uri ? { uri } : null);
+  const status = useAudioPlayerStatus(player);
 
   // Initialize playback rate
   useEffect(() => {

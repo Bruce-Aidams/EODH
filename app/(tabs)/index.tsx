@@ -122,11 +122,11 @@ export default function HomeScreen() {
         {/* Modern Search Bar */}
         <TouchableOpacity
           style={styles.searchBar}
-          onPress={() => router.push('/(tabs)/library')}
+          onPress={() => router.push('/search')}
           activeOpacity={0.8}
         >
           <Ionicons name="search" size={20} color="rgba(255,255,255,0.6)" />
-          <Text style={styles.searchPlaceholder}>Search books, authors...</Text>
+          <Text style={styles.searchPlaceholder}>Search by title or author...</Text>
         </TouchableOpacity>
       </View>
 
