@@ -7,7 +7,6 @@ import {
   TouchableOpacity,
   StatusBar,
   ActivityIndicator,
-  ScrollView,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -23,16 +22,53 @@ interface SearchResult {
   book_title: string;
   book_author: string;
   book_cover_url: string | null;
-  chapter_id: string;
+  chapter_id: string | null;
   chapter_title: string;
   snippet: string;
+  rank: number;
 }
+
+// Simple LRU cache for search results
+class SearchCache {
+  private cache = new Map<string, { result: SearchResult[]; timestamp: number }>();
+  private readonly maxSize = 50;
+  private readonly ttl = 5 * 60 * 1000; // 5 minutes
+
+  get(key: string): SearchResult[] | null {
+    const entry = this.cache.get(key);
+    if (!entry) return null;
+    if (Date.now() - entry.timestamp > this.ttl) {
+      this.cache.delete(key);
+      return null;
+    }
+    return entry.result;
+  }
+
+  set(key: string, result: SearchResult[]): void {
+    // Evict oldest if at capacity
+    if (this.cache.size >= this.maxSize && !this.cache.has(key)) {
+      const iterator = this.cache.keys();
+      const oldestKey = iterator.next().value;
+      if (oldestKey !== undefined) {
+        this.cache.delete(oldestKey);
+      }
+    }
+    this.cache.set(key, { result, timestamp: Date.now() });
+  }
+
+  clear(): void {
+    this.cache.clear();
+  }
+}
+
+const searchCache = new SearchCache();
 
 export default function GlobalSearchScreen() {
   const router = useRouter();
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
   
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -47,74 +83,90 @@ export default function GlobalSearchScreen() {
       return;
     }
 
+    // Check cache first
+    const cached = searchCache.get(trimmed);
+    if (cached) {
+      setResults(cached);
+      setHasSearched(true);
+      setIsSearching(false);
+      return;
+    }
+
+    // Abort any previous in-flight search
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    abortControllerRef.current = new AbortController();
+
     setIsSearching(true);
     setHasSearched(true);
 
     try {
-      // Search across books and chapters using ILIKE
+      // Use the optimized full-text search RPC function
+      // This uses GIN indexes and websearch_to_tsquery for fast keyword search
       const { data, error } = await supabase
-        .from('book_chapters')
-        .select(`
-          id,
-          title,
-          content,
-          books (
-            id,
-            title,
-            author,
-            cover_url
-          )
-        `)
-        .ilike('content', `%${trimmed}%`)
-        .or(`books.title.ilike.%${trimmed}%,books.author.ilike.%${trimmed}%,title.ilike.%${trimmed}%`)
+        .rpc('search_all_books', {
+          p_query: trimmed,
+          p_limit: 50,
+        })
         .limit(50);
 
-      if (!error && data) {
-        const searchResults: SearchResult[] = [];
-        const lowerQuery = trimmed.toLowerCase();
+      if (abortControllerRef.current?.signal.aborted) return;
 
-        for (const item of data) {
-          const book = item.books && Array.isArray(item.books) ? item.books[0] : item.books;
-          const content = item.content || '';
-          const lowerContent = content.toLowerCase();
-          
-          // Find the match position and extract snippet
-          const matchIndex = lowerContent.indexOf(lowerQuery);
-          let snippet = '';
-          
-          if (matchIndex !== -1) {
-            const snippetStart = Math.max(0, matchIndex - 50);
-            const snippetEnd = Math.min(content.length, matchIndex + trimmed.length + 50);
-            snippet = content.substring(snippetStart, snippetEnd);
-            
-            // Highlight the match
-            const lowerSnippet = snippet.toLowerCase();
-            const posInSnippet = lowerSnippet.indexOf(lowerQuery);
-            if (posInSnippet !== -1) {
-              const before = snippet.substring(0, posInSnippet);
-              const match = snippet.substring(posInSnippet, posInSnippet + trimmed.length);
-              const after = snippet.substring(posInSnippet + trimmed.length);
-              snippet = `${before}**${match}**${after}`;
-            }
-          }
+      if (error) {
+        console.error('Search RPC error:', error);
+        // Fallback: try searching books by title/author only if RPC fails
+        const { data: fallbackData, error: fallbackError } = await supabase
+          .from('books')
+          .select('id, title, author, cover_url')
+          .ilike('title', `%${trimmed}%`)
+          .or(`author.ilike.%${trimmed}%`)
+          .limit(20);
 
-          searchResults.push({
-            book_id: book?.id || '',
-            book_title: book?.title || '',
-            book_author: book?.author || '',
-            book_cover_url: book?.cover_url || null,
-            chapter_id: item.id,
-            chapter_title: item.title,
-            snippet,
-          });
+        if (abortControllerRef.current?.signal.aborted) return;
+
+        if (!fallbackError && fallbackData) {
+          const fallbackResults: SearchResult[] = fallbackData.map((book: any) => ({
+            book_id: book.id,
+            book_title: book.title,
+            book_author: book.author,
+            book_cover_url: book.cover_url || null,
+            chapter_id: null,
+            chapter_title: book.title,
+            snippet: `${book.title} by ${book.author}`,
+            rank: 0,
+          }));
+          setResults(fallbackResults);
+          searchCache.set(trimmed, fallbackResults);
         }
+        return;
+      }
+
+      if (data) {
+        const searchResults: SearchResult[] = data.map((item: any) => ({
+          book_id: item.book_id || '',
+          book_title: item.book_title || '',
+          book_author: item.book_author || '',
+          book_cover_url: item.book_cover_url || null,
+          chapter_id: item.chapter_id || null,
+          chapter_title: item.chapter_title || '',
+          snippet: item.snippet || '',
+          rank: item.rank || 0,
+        }));
+
+        // Sort by rank (relevance)
+        searchResults.sort((a, b) => b.rank - a.rank);
 
         setResults(searchResults);
+        searchCache.set(trimmed, searchResults);
       }
-    } catch (err) {
+    } catch (err: any) {
+      if (err.name === 'AbortError') return;
       console.error('Global search error:', err);
     } finally {
-      setIsSearching(false);
+      if (abortControllerRef.current && !abortControllerRef.current.signal.aborted) {
+        setIsSearching(false);
+      }
     }
   }, []);
 
@@ -128,12 +180,14 @@ export default function GlobalSearchScreen() {
     if (!trimmed || trimmed.length < 2) {
       setResults([]);
       setHasSearched(false);
+      setIsSearching(false);
       return;
     }
 
+    // Reduced debounce time for faster response (300ms instead of 400ms)
     debounceTimerRef.current = setTimeout(() => {
       performSearch(query);
-    }, 400);
+    }, 300);
 
     return () => {
       if (debounceTimerRef.current) {
@@ -142,14 +196,42 @@ export default function GlobalSearchScreen() {
     };
   }, [query, performSearch]);
 
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, []);
+
   const handleResultPress = (bookId: string) => {
     router.push(`/book/${bookId}/reader`);
   };
 
-  const renderResult = ({ item, index }: { item: SearchResult; index: number }) => (
+  // Clean snippet: remove HTML tags from ts_headline output
+  const cleanSnippet = (snippet: string): string => {
+    if (!snippet) return '';
+    return snippet
+      .replace(/<mark>/gi, '')
+      .replace(/<\/mark>/gi, '')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .trim();
+  };
+
+  const renderResult = ({ item }: { item: SearchResult }) => (
     <TouchableOpacity
       style={[styles.resultItem, { borderBottomColor: colors.border }]}
       onPress={() => handleResultPress(item.book_id)}
+      activeOpacity={0.7}
     >
       <View style={styles.resultHeader}>
         <Ionicons name="book" size={20} color={COLORS.royalPurple} />
@@ -160,15 +242,19 @@ export default function GlobalSearchScreen() {
           {item.book_author}
         </Text>
       </View>
-      <View style={styles.chapterInfo}>
-        <Ionicons name="document-text" size={16} color={colors.textMuted} />
-        <Text style={[styles.chapterTitle, { color: colors.textSecondary }]} numberOfLines={1}>
-          {item.chapter_title}
+      {item.chapter_id && (
+        <View style={styles.chapterInfo}>
+          <Ionicons name="document-text" size={16} color={colors.textMuted} />
+          <Text style={[styles.chapterTitle, { color: colors.textSecondary }]} numberOfLines={1}>
+            {item.chapter_title}
+          </Text>
+        </View>
+      )}
+      {item.snippet ? (
+        <Text style={[styles.snippet, { color: colors.textMuted }]} numberOfLines={3}>
+          {cleanSnippet(item.snippet)}
         </Text>
-      </View>
-      <Text style={[styles.snippet, { color: colors.textMuted }]}>
-        {item.snippet.replace(/\*\*/g, '')}
-      </Text>
+      ) : null}
     </TouchableOpacity>
   );
 
@@ -207,9 +293,13 @@ export default function GlobalSearchScreen() {
         <FlatList
           data={results}
           renderItem={renderResult}
-          keyExtractor={(item, index) => `${item.chapter_id}-${index}`}
+          keyExtractor={(item) => `${item.book_id}-${item.chapter_id || 'meta'}`}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
+          initialNumToRender={10}
+          maxToRenderPerBatch={5}
+          windowSize={5}
+          removeClippedSubviews={true}
         />
       ) : hasSearched && results.length === 0 ? (
         <View style={styles.emptyState}>
