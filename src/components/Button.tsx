@@ -1,14 +1,15 @@
 import React from 'react';
 import {
-  TouchableOpacity,
   Text,
   StyleSheet,
   ActivityIndicator,
   ViewStyle,
   TextStyle,
+  View,
 } from 'react-native';
 import { BORDER_RADIUS } from '@/constants/theme';
 import { useTheme } from '@/lib/theme/ThemeContext';
+import RipplePress from '@/components/RipplePress';
 
 type ButtonVariant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger';
 type ButtonSize = 'small' | 'medium' | 'large';
@@ -90,7 +91,11 @@ export default function Button({
   const sStyle = sizeStyles[size];
 
   return (
-    <TouchableOpacity
+    <RipplePress
+      onPress={onPress}
+      disabled={disabled || loading}
+      rippleColor={vStyle.text}
+      rippleOpacity={0.15}
       style={[
         styles.container,
         {
@@ -103,23 +108,22 @@ export default function Button({
         fullWidth && styles.fullWidth,
         style,
       ]}
-      onPress={onPress}
-      disabled={disabled || loading}
-      activeOpacity={0.7}
     >
-      {loading ? (
-        <ActivityIndicator color={vStyle.text} size="small" />
-      ) : (
-        <>
-          {icon}
-          {title && (
-            <Text style={[styles.text, { color: vStyle.text, fontSize: sStyle.fontSize }, textStyle]}>
-              {title}
-            </Text>
-          )}
-        </>
-      )}
-    </TouchableOpacity>
+      <View style={styles.inner}>
+        {loading ? (
+          <ActivityIndicator color={vStyle.text} size="small" />
+        ) : (
+          <>
+            {icon}
+            {title && (
+              <Text style={[styles.text, { color: vStyle.text, fontSize: sStyle.fontSize }, textStyle]}>
+                {title}
+              </Text>
+            )}
+          </>
+        )}
+      </View>
+    </RipplePress>
   );
 }
 
@@ -130,6 +134,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderRadius: BORDER_RADIUS.md,
     borderWidth: 1,
+    gap: 8,
+    overflow: 'hidden',
+  },
+  inner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     gap: 8,
   },
   fullWidth: {

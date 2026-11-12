@@ -9,6 +9,7 @@ import {
   StatusBar,
   Alert,
   Dimensions,
+  Platform,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -20,6 +21,7 @@ import { Book } from '@/types';
 import { SPACING, BORDER_RADIUS, GRADIENTS } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
 import { useTheme } from '@/lib/theme/ThemeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -231,6 +233,26 @@ export default function BookDetailScreen() {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['left', 'right']}>
       <StatusBar barStyle={colors.statusBar} />
+
+      {/* Blurred cover backdrop */}
+      {book.cover_url && (
+        <View style={styles.backdropContainer}>
+          <Image
+            source={{ uri: book.cover_url }}
+            style={styles.backdropImage}
+            blurRadius={60}
+          />
+          <LinearGradient
+            colors={[
+              `${colors.background}CC`,
+              `${colors.background}EE`,
+              colors.background,
+            ]}
+            style={styles.backdropOverlay}
+          />
+        </View>
+      )}
+
       <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + SPACING.xxl + 20 }]}>
         {/* Header */}
         <View style={[styles.header, { paddingTop: insets.top + SPACING.md }]}>
@@ -416,6 +438,18 @@ export default function BookDetailScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  backdropContainer: {
+    ...StyleSheet.absoluteFill,
+    overflow: 'hidden',
+  },
+  backdropImage: {
+    width: Dimensions.get('window').width,
+    height: Dimensions.get('window').height,
+    resizeMode: 'cover',
+  },
+  backdropOverlay: {
+    ...StyleSheet.absoluteFill,
   },
   loadingContainer: {
     flex: 1,
