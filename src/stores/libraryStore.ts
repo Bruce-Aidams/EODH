@@ -1,6 +1,10 @@
 import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Book, ReadingProgress, ListeningProgress, Bookmark, Highlight, Note } from '@/types';
 import { supabase } from '@/lib/supabase/client';
+
+const LIBRARY_CACHE_TTL = 60_000; // 60 seconds in milliseconds
 
 interface LibraryState {
   books: Book[];
@@ -15,6 +19,7 @@ interface LibraryState {
   searchQuery: string;
   selectedCategory: string | null;
   sortBy: 'title' | 'date' | 'author';
+  booksFetchedAt: number | null;
   
   fetchBooks: () => Promise<void>;
   fetchFeaturedBooks: () => Promise<void>;
@@ -42,19 +47,22 @@ interface LibraryState {
   removeNote: (noteId: string) => Promise<void>;
 }
 
-export const useLibraryStore = create<LibraryState>((set, get) => ({
-  books: [],
-  featuredBooks: [],
-  recentlyOpened: [],
-  recentlyListened: [],
-  favorites: [],
-  bookmarks: [],
-  highlights: [],
-  notes: [],
-  isLoading: false,
-  searchQuery: '',
-  selectedCategory: null,
-  sortBy: 'title',
+export const useLibraryStore = create<LibraryState>()(
+  persist(
+    (set, get) => ({
+      books: [],
+      featuredBooks: [],
+      recentlyOpened: [],
+      recentlyListened: [],
+      favorites: [],
+      bookmarks: [],
+      highlights: [],
+      notes: [],
+      isLoading: false,
+      searchQuery: '',
+      selectedCategory: null,
+      sortBy: 'title',
+      booksFetchedAt: null,
 
   fetchBooks: async () => {
     set({ isLoading: true });

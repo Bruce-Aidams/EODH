@@ -50,6 +50,7 @@ import { ReaderOverflowMenu } from '@/components/reader/ReaderOverflowMenu';
 import { AudioPlayerBar } from '@/components/reader/AudioPlayerBar';
 import { ChapterPlaylist } from '@/components/reader/ChapterPlaylist';
 import { AISummaryPanel } from '@/components/reader/AISummaryPanel';
+import { TapZones } from '@/components/reader/TapZones';
 
 // Services
 import { readingProgressService } from '@/lib/reader/ReadingProgressService';
@@ -739,6 +740,27 @@ export default function ReaderScreen() {
     }
   };
 
+  // Tap zone navigation handlers
+  const handleTapPrevious = async () => {
+    await haptic('selection');
+    if (chaptersWithContent.length > 0 && currentChapterIndex > 0) {
+      navigateToChapterIndex(currentChapterIndex - 1);
+    } else if (scrollViewRef.current) {
+      // Scroll to top of current chapter
+      (scrollViewRef.current as any).scrollTo({ y: 0, animated: true });
+    }
+  };
+
+  const handleTapNext = async () => {
+    await haptic('selection');
+    if (chaptersWithContent.length > 0 && currentChapterIndex < chaptersWithContent.length - 1) {
+      navigateToChapterIndex(currentChapterIndex + 1);
+    } else if (scrollViewRef.current) {
+      // Scroll to bottom of current chapter
+      (scrollViewRef.current as any).scrollToEnd({ animated: true });
+    }
+  };
+
   // Actions toggle
   const toggleActions = () => {
     setShowActions(!showActions);
@@ -1338,9 +1360,14 @@ export default function ReaderScreen() {
         <ProgressBar progress={progressPercent} height={3} />
       )}
 
-      {/* Content */}
+      {/* Content with tap zone navigation */}
       <AnimatedView style={{ flex: 1 }} fadeDelay={200} fadeDuration={400} slideDirection="up" slideDistance={15}>
-        <TouchableOpacity style={styles.tapArea} onPress={toggleHeader} activeOpacity={1}>
+        <TapZones
+          onPrevious={handleTapPrevious}
+          onNext={handleTapNext}
+          onToggleUI={toggleHeader}
+          disabled={showSearch || showToc || showSettings || showActions || showOverflowMenu || showChapterPlaylist || showAISummary}
+        >
           {book?.document_type === 'pdf' && viewMode === 'original' && (localDocumentUri || book.document_url) ? (
             <View style={{ flex: 1 }}>
               <PdfReader
@@ -1376,7 +1403,7 @@ export default function ReaderScreen() {
               onScroll={handleScroll}
             />
           )}
-        </TouchableOpacity>
+        </TapZones>
       </AnimatedView>
 
       {/* View Mode Toggle for PDF Books */}
@@ -1905,9 +1932,6 @@ const styles = StyleSheet.create({
   progressBarFill: {
     height: '100%',
     borderRadius: 2,
-  },
-  tapArea: {
-    flex: 1,
   },
   modalOverlay: {
     flex: 1,
