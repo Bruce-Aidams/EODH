@@ -27,7 +27,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 export default function BookDetailScreen() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
-  const { getReadingProgress, getListeningProgress, toggleFavorite, favorites } = useLibraryStore();
+  const getReadingProgress = useLibraryStore((s) => s.getReadingProgress);
+  const getListeningProgress = useLibraryStore((s) => s.getListeningProgress);
+  const toggleFavorite = useLibraryStore((s) => s.toggleFavorite);
+  const favorites = useLibraryStore((s) => s.favorites);
   const { showSuccess, showError, showWarning } = useToast();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();

@@ -4,33 +4,33 @@ describe('Theme utilities', () => {
   describe('getThemeColors', () => {
     it('returns light theme when user preference is light', () => {
       const result = getThemeColors('light', null);
-      expect(result.background).toBe('#F6F5FC');
-      expect(result.text).toBe('#080B2E');
-      expect(result.primary).toBe('#5415E8');
+      expect(result.background).toBe('#F9FAFB');
+      expect(result.text).toBe('#111827');
+      expect(result.primary).toBe('#6366F1');
     });
 
     it('returns dark theme when user preference is dark', () => {
       const result = getThemeColors('dark', null);
-      expect(result.background).toBe('#111827');
-      expect(result.text).toBe('#FFFFFF');
-      expect(result.primary).toBe('#812BFF');
+      expect(result.background).toBe('#030712');
+      expect(result.text).toBe('#F9FAFB');
+      expect(result.primary).toBe('#818CF8');
     });
 
     it('returns dark theme when system is dark and user preference is system', () => {
       const result = getThemeColors('system', 'dark');
-      expect(result.background).toBe('#111827');
+      expect(result.background).toBe('#030712');
       expect(result.statusBar).toBe('light-content');
     });
 
     it('returns light theme when system is light and user preference is system', () => {
       const result = getThemeColors('system', 'light');
-      expect(result.background).toBe('#F6F5FC');
+      expect(result.background).toBe('#F9FAFB');
       expect(result.statusBar).toBe('dark-content');
     });
 
     it('returns light theme when system is null and user preference is system', () => {
       const result = getThemeColors('system', null);
-      expect(result.background).toBe('#F6F5FC');
+      expect(result.background).toBe('#F9FAFB');
     });
   });
 

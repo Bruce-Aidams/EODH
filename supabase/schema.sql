@@ -298,6 +298,7 @@ CREATE TABLE IF NOT EXISTS listening_progress (
 CREATE INDEX idx_listening_progress_user ON listening_progress(user_id);
 CREATE INDEX idx_listening_progress_book ON listening_progress(book_id);
 
+
 -- =====================================================
 -- 16. USER PREFERENCES
 -- =====================================================

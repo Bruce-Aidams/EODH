@@ -33,7 +33,9 @@ const TEXT_ALIGNMENTS = [
 
 export default function ReadingSettingsScreen() {
   const router = useRouter();
-  const { readingSettings, setReadingSettings, resetSettings } = useSettingsStore();
+  const readingSettings = useSettingsStore((s) => s.readingSettings);
+  const setReadingSettings = useSettingsStore((s) => s.setReadingSettings);
+  const resetSettings = useSettingsStore((s) => s.resetSettings);
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const [showPreview, setShowPreview] = useState(false);

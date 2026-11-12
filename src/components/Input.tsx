@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, TextInput, TouchableOpacity, TextInputProps, StyleSheet, ViewStyle } from 'react-native';
-import { BORDER_RADIUS, SPACING } from '@/constants/theme';
+import { BORDER_RADIUS } from '@/constants/theme';
 import { useTheme } from '@/lib/theme/ThemeContext';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -28,7 +28,7 @@ export default function Input({
 
   return (
     <View style={[styles.container, containerStyle]}>
-      {label && <Text style={[styles.label, { color: colors.text }]}>{label}</Text>}
+      {label && <Text style={[styles.label, { color: colors.textSecondary }]}>{label}</Text>}
       <View
         style={[
           styles.inputWrapper,
@@ -38,7 +38,7 @@ export default function Input({
           },
         ]}
       >
-        {leftIcon && <Ionicons name={leftIcon} size={20} color={colors.textMuted} />}
+        {leftIcon && <Ionicons name={leftIcon} size={18} color={colors.textMuted} />}
         <TextInput
           style={[
             styles.input,
@@ -51,7 +51,7 @@ export default function Input({
         />
         {rightIcon && (
           <TouchableOpacity onPress={onRightIconPress}>
-            <Ionicons name={rightIcon} size={20} color={colors.textMuted} />
+            <Ionicons name={rightIcon} size={18} color={colors.textMuted} />
           </TouchableOpacity>
         )}
       </View>
@@ -62,29 +62,30 @@ export default function Input({
 
 const styles = StyleSheet.create({
   container: {
-    marginBottom: SPACING.md,
+    marginBottom: 12,
   },
   label: {
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: SPACING.sm,
+    fontSize: 13,
+    fontWeight: '500',
+    marginBottom: 6,
+    letterSpacing: 0.1,
   },
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
     borderRadius: BORDER_RADIUS.md,
     borderWidth: 1,
-    paddingHorizontal: SPACING.md,
-    minHeight: 48,
+    paddingHorizontal: 12,
+    minHeight: 40,
+    gap: 8,
   },
   input: {
     flex: 1,
-    fontSize: 15,
+    fontSize: 14,
     paddingVertical: 0,
-    paddingHorizontal: SPACING.sm,
   },
   error: {
     fontSize: 12,
-    marginTop: SPACING.xs,
+    marginTop: 4,
   },
 });

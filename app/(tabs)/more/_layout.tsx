@@ -6,10 +6,12 @@ export default function MoreLayout() {
       <Stack.Screen name="index" />
       <Stack.Screen name="profile" />
       <Stack.Screen name="history" />
+      <Stack.Screen name="analytics" />
       <Stack.Screen name="favorites" />
       <Stack.Screen name="downloads" />
       <Stack.Screen name="reading-settings" />
       <Stack.Screen name="audio-settings" />
+      <Stack.Screen name="voice-selection" />
       <Stack.Screen name="help" />
       <Stack.Screen name="about" />
     </Stack>

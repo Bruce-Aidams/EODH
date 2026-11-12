@@ -27,7 +27,9 @@ interface FavoriteBook {
 
 export default function FavoritesScreen() {
   const router = useRouter();
-  const { favorites, toggleFavorite, books } = useLibraryStore();
+  const favorites = useLibraryStore((s) => s.favorites);
+  const toggleFavorite = useLibraryStore((s) => s.toggleFavorite);
+  const books = useLibraryStore((s) => s.books);
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const [favoriteBooks, setFavoriteBooks] = useState<FavoriteBook[]>([]);

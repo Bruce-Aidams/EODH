@@ -300,7 +300,9 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       .eq('book_id', bookId)
       .order('created_at', { ascending: false });
     
-    return data || [];
+    const bookmarks = data || [];
+    set({ bookmarks });
+    return bookmarks;
   },
 
   addBookmark: async (bookmark: Omit<Bookmark, 'id' | 'created_at'>) => {
@@ -324,6 +326,9 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
 
   removeBookmark: async (bookmarkId: string) => {
     await supabase.from('bookmarks').delete().eq('id', bookmarkId);
+    set(state => ({
+      bookmarks: state.bookmarks.filter(b => b.id !== bookmarkId),
+    }));
   },
 
   getHighlights: async (bookId: string) => {
@@ -337,7 +342,9 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       .eq('book_id', bookId)
       .order('created_at', { ascending: false });
     
-    return data || [];
+    const highlights = data || [];
+    set({ highlights });
+    return highlights;
   },
 
   addHighlight: async (highlight: Omit<Highlight, 'id' | 'created_at' | 'updated_at'>) => {
@@ -364,6 +371,9 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
 
   removeHighlight: async (highlightId: string) => {
     await supabase.from('highlights').delete().eq('id', highlightId);
+    set(state => ({
+      highlights: state.highlights.filter(h => h.id !== highlightId),
+    }));
   },
 
   getNotes: async (bookId: string) => {

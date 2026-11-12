@@ -46,7 +46,7 @@ export default function AdminAudioScreen() {
   const router = useRouter();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
-  const { isAdmin } = useAuthStore();
+  const isAdmin = useAuthStore((s) => s.isAdmin);
   const [audioBooks, setAudioBooks] = useState<AudioBook[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedBook, setSelectedBook] = useState<AudioBook | null>(null);

@@ -31,7 +31,8 @@ const SLEEP_TIMERS = [
 
 export default function AudioSettingsScreen() {
   const router = useRouter();
-  const { audioSettings, setAudioSettings } = useSettingsStore();
+  const audioSettings = useSettingsStore((s) => s.audioSettings);
+  const setAudioSettings = useSettingsStore((s) => s.setAudioSettings);
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const [sleepTimerIndex, setSleepTimerIndex] = useState(
@@ -203,9 +204,12 @@ export default function AudioSettingsScreen() {
           <Text style={styles.sectionSubtitle}>
             Voice used for text-to-speech narration
           </Text>
-          <TouchableOpacity style={styles.voiceButton}>
+          <TouchableOpacity 
+            style={styles.voiceButton}
+            onPress={() => router.push('/(tabs)/more/voice-selection' as any)}
+          >
             <Ionicons name="volume-high-outline" size={20} color={COLORS.royalPurple} />
-            <Text style={styles.voiceButtonText}>System Default</Text>
+            <Text style={styles.voiceButtonText}>Select Narrator Voice</Text>
             <Ionicons name="chevron-forward" size={16} color={COLORS.gray400} />
           </TouchableOpacity>
         </View>

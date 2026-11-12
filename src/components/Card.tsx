@@ -1,6 +1,6 @@
 import React from 'react';
-import { View, ViewStyle, StyleSheet } from 'react-native';
-import { BORDER_RADIUS, SPACING } from '@/constants/theme';
+import { View, TouchableOpacity, ViewStyle, StyleSheet } from 'react-native';
+import { BORDER_RADIUS } from '@/constants/theme';
 import { useTheme } from '@/lib/theme/ThemeContext';
 
 interface CardProps {
@@ -8,47 +8,59 @@ interface CardProps {
   style?: ViewStyle;
   padding?: number;
   onPress?: () => void;
-  elevation?: boolean;
+  variant?: 'default' | 'subtle' | 'outlined';
 }
 
 export default function Card({
   children,
   style,
-  padding = SPACING.md,
+  padding = 16,
   onPress,
-  elevation = true,
+  variant = 'default',
 }: CardProps) {
   const { colors } = useTheme();
 
-  const Wrapper = onPress ? View : View;
+  const bg = variant === 'subtle' ? colors.surfaceVariant : colors.card;
+  const borderColor = variant === 'outlined' ? colors.border : 'transparent';
 
-  return (
-    <Wrapper
+  const content = (
+    <View
       style={[
         styles.card,
         {
-          backgroundColor: colors.card,
+          backgroundColor: bg,
           padding,
-          shadowColor: colors.cardShadow,
+          borderColor,
         },
-        elevation && styles.elevation,
         style,
       ]}
     >
       {children}
-    </Wrapper>
+    </View>
   );
+
+  if (onPress) {
+    return (
+      <TouchableOpacity
+        activeOpacity={0.7}
+        onPress={onPress}
+        style={styles.pressable}
+      >
+        {content}
+      </TouchableOpacity>
+    );
+  }
+
+  return content;
 }
 
 const styles = StyleSheet.create({
   card: {
     borderRadius: BORDER_RADIUS.md,
-    marginBottom: SPACING.sm,
+    borderWidth: 1,
+    overflow: 'hidden',
   },
-  elevation: {
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 2,
+  pressable: {
+    borderRadius: BORDER_RADIUS.md,
   },
 });

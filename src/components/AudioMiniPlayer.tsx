@@ -21,20 +21,18 @@ interface AudioMiniPlayerProps {
 export const AudioMiniPlayer: React.FC<AudioMiniPlayerProps> = ({ bookId }) => {
   const router = useRouter();
   const { colors } = useTheme();
-  const { audioSettings } = useSettingsStore();
+  const audioSettings = useSettingsStore((s) => s.audioSettings);
   
-  const {
-    isPlaying,
-    currentTime,
-    duration,
-    playbackSpeed,
-    segments,
-    currentSegment,
-    play,
-    pause,
-    seek,
-    setPlaybackSpeed,
-  } = useAudioStore();
+  const isPlaying = useAudioStore((s) => s.isPlaying);
+  const currentTime = useAudioStore((s) => s.currentTime);
+  const duration = useAudioStore((s) => s.duration);
+  const playbackSpeed = useAudioStore((s) => s.playbackSpeed);
+  const segments = useAudioStore((s) => s.segments);
+  const currentSegment = useAudioStore((s) => s.currentSegment);
+  const play = useAudioStore((s) => s.play);
+  const pause = useAudioStore((s) => s.pause);
+  const seek = useAudioStore((s) => s.seek);
+  const setPlaybackSpeed = useAudioStore((s) => s.setPlaybackSpeed);
 
   const [progress, setProgress] = useState(0);
 

@@ -22,6 +22,10 @@ interface SearchResult {
   book_title: string;
   book_author: string;
   book_cover_url: string | null;
+  chapter_id: string | null;
+  chapter_title: string;
+  snippet: string;
+  rank: number;
 }
 
 // Simple LRU cache for search results
@@ -98,13 +102,11 @@ export default function GlobalSearchScreen() {
     setHasSearched(true);
 
     try {
-      // Search books by title and author only
-      const { data, error } = await supabase
-        .from('books')
-        .select('id, title, author, cover_url')
-        .ilike('title', `%${trimmed}%`)
-        .or(`author.ilike.%${trimmed}%`)
-        .limit(50);
+      // Search all book content using full-text search function
+      const { data, error } = await supabase.rpc('search_all_books', {
+        p_query: trimmed,
+        p_limit: 50,
+      });
 
       if (abortControllerRef.current?.signal.aborted) return;
 
@@ -114,11 +116,15 @@ export default function GlobalSearchScreen() {
       }
 
       if (data) {
-        const searchResults: SearchResult[] = data.map((book: any) => ({
-          book_id: book.id,
-          book_title: book.title,
-          book_author: book.author,
-          book_cover_url: book.cover_url || null,
+        const searchResults: SearchResult[] = data.map((row: any) => ({
+          book_id: row.book_id,
+          book_title: row.book_title,
+          book_author: row.book_author,
+          book_cover_url: row.book_cover_url || null,
+          chapter_id: row.chapter_id || null,
+          chapter_title: row.chapter_title || '',
+          snippet: row.snippet || '',
+          rank: row.rank || 0,
         }));
 
         setResults(searchResults);
@@ -172,14 +178,24 @@ export default function GlobalSearchScreen() {
     };
   }, []);
 
-  const handleResultPress = (bookId: string) => {
-    router.push(`/book/${bookId}/reader`);
+  const handleResultPress = (item: SearchResult) => {
+    const params: Record<string, string> = {};
+    if (item.chapter_id) {
+      params.chapterId = item.chapter_id;
+    }
+    if (query.trim()) {
+      params.searchQuery = query.trim();
+    }
+    router.push({
+      pathname: `/book/${item.book_id}/reader`,
+      params,
+    });
   };
 
-  const renderResult = ({ item }: { item: SearchResult }) => (
+  const renderResult = useCallback(({ item }: { item: SearchResult }) => (
     <TouchableOpacity
       style={[styles.resultItem, { borderBottomColor: colors.border }]}
-      onPress={() => handleResultPress(item.book_id)}
+      onPress={() => handleResultPress(item)}
       activeOpacity={0.7}
     >
       <View style={styles.resultHeader}>
@@ -191,8 +207,18 @@ export default function GlobalSearchScreen() {
           {item.book_author}
         </Text>
       </View>
+      {item.chapter_id && item.chapter_title ? (
+        <Text style={[styles.chapterText, { color: colors.textSecondary }]} numberOfLines={1}>
+          {item.chapter_title}
+        </Text>
+      ) : null}
+      {item.snippet ? (
+        <Text style={[styles.snippetText, { color: colors.textMuted }]} numberOfLines={2}>
+          {item.snippet.replace(/<mark>/g, '').replace(/<\/mark>/g, '')}
+        </Text>
+      ) : null}
     </TouchableOpacity>
-  );
+  ), [colors.border, colors.text, colors.textSecondary, colors.textMuted, handleResultPress]);
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['left', 'right']}>
@@ -213,7 +239,7 @@ export default function GlobalSearchScreen() {
           value={query}
           onChangeText={setQuery}
           onSearch={() => performSearch(query)}
-          placeholder="Search by title or author..."
+          placeholder="Search across all books..."
         />
       </View>
 
@@ -254,7 +280,7 @@ export default function GlobalSearchScreen() {
             Search your library
           </Text>
           <Text style={[styles.emptySubtitle, { color: colors.textMuted }]}>
-            Find books by title or author
+            Find books by title, author, or content
           </Text>
         </View>
       )}
@@ -306,6 +332,18 @@ const styles = StyleSheet.create({
   authorText: {
     fontSize: FONT_SIZE.sm,
     marginLeft: SPACING.sm,
+  },
+  chapterText: {
+    fontSize: FONT_SIZE.sm,
+    marginLeft: SPACING.xs + 20,
+    marginTop: SPACING.xs,
+    fontStyle: 'italic',
+  },
+  snippetText: {
+    fontSize: FONT_SIZE.sm,
+    marginLeft: SPACING.xs + 20,
+    marginTop: SPACING.xs,
+    lineHeight: FONT_SIZE.sm * 1.5,
   },
   loadingContainer: {
     flex: 1,

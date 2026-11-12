@@ -1,6 +1,6 @@
 import React from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
-import { SPACING } from '@/constants/theme';
+import { View, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
+import { BORDER_RADIUS } from '@/constants/theme';
 import { useTheme } from '@/lib/theme/ThemeContext';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -26,12 +26,12 @@ export default function SearchBar({
       style={[
         styles.container,
         {
-          backgroundColor: colors.surface,
-          shadowColor: colors.cardShadow,
+          backgroundColor: colors.surfaceVariant,
+          borderColor: colors.border,
         },
       ]}
     >
-      <Ionicons name="search" size={20} color={colors.textMuted} />
+      <Ionicons name="search" size={18} color={colors.textMuted} />
       <TextInput
         style={[styles.input, { color: colors.text }]}
         placeholder={placeholder}
@@ -43,7 +43,7 @@ export default function SearchBar({
       />
       {value.length > 0 && (
         <TouchableOpacity onPress={onClear || (() => onChangeText(''))}>
-          <Ionicons name="close-circle" size={20} color={colors.textMuted} />
+          <Ionicons name="close-circle" size={18} color={colors.textMuted} />
         </TouchableOpacity>
       )}
     </View>
@@ -54,20 +54,17 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginHorizontal: SPACING.md,
-    marginBottom: SPACING.md,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-    borderRadius: 12,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
-    gap: SPACING.sm,
+    marginHorizontal: 16,
+    marginBottom: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: BORDER_RADIUS.md,
+    borderWidth: 1,
+    gap: 8,
   },
   input: {
     flex: 1,
-    fontSize: 15,
+    fontSize: 14,
     paddingVertical: 0,
   },
 });

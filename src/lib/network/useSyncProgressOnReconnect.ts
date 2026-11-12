@@ -13,8 +13,10 @@ import { useLibraryStore } from '@/stores/libraryStore';
  * When online, pending progress updates are sent to Supabase.
  */
 export function useSyncProgressOnReconnect() {
-  const { user, isAuthenticated } = useAuthStore();
-  const { fetchReadingProgress, fetchListeningProgress } = useLibraryStore();
+  const user = useAuthStore((s) => s.user);
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const fetchReadingProgress = useLibraryStore((s) => s.fetchReadingProgress);
+  const fetchListeningProgress = useLibraryStore((s) => s.fetchListeningProgress);
   const lastSyncTime = useRef<number>(0);
   const isSyncing = useRef<boolean>(false);
 

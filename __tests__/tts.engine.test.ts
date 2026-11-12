@@ -9,6 +9,40 @@ jest.mock('expo-speech', () => ({
   isSpeakingAsync: jest.fn(() => Promise.resolve(false)),
 }));
 
+// Mock supabase client to avoid ESM react-native-url-polyfill in tests
+jest.mock('@/lib/supabase/client', () => ({
+  supabase: {
+    from: jest.fn(() => ({
+      select: jest.fn(() => ({
+        eq: jest.fn(() => Promise.resolve({ data: [], error: null })),
+        order: jest.fn(() => Promise.resolve({ data: [], error: null })),
+        single: jest.fn(() => Promise.resolve({ data: null, error: null })),
+        insert: jest.fn(() => ({
+          select: jest.fn(() => Promise.resolve({ data: [], error: null })),
+        })),
+      })),
+    })),
+    storage: {
+      from: jest.fn(() => ({
+        upload: jest.fn(() => Promise.resolve({ data: { path: '' }, error: null })),
+        getPublicUrl: jest.fn(() => ({ data: { publicUrl: '' } })),
+      })),
+    },
+    functions: {
+      invoke: jest.fn(() => Promise.resolve({ data: null, error: null })),
+    },
+  },
+  isSupabaseConfigured: () => false,
+}));
+
+// Mock neural TTS provider to avoid loading supabase client
+jest.mock('@/lib/tts/neuralProvider', () => ({
+  generateNeuralTTS: jest.fn(() => Promise.resolve({ audioUrl: '', duration: 0, cached: false })),
+  generateNeuralTTSBatch: jest.fn(() => Promise.resolve({ segments: [], totalDuration: 0 })),
+  isNeuralTTSAvailable: jest.fn(() => Promise.resolve(false)),
+  getNeuralTTSVoices: jest.fn(() => Promise.resolve([])),
+}));
+
 describe('TTSEngine', () => {
   let engine: TTSEngine;
 

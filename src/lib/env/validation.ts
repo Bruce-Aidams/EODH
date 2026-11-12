@@ -44,9 +44,14 @@ export function validateEnvironment(): EnvValidationResult {
   }
 
   // Validate anon key format if present
+  // Supabase anon keys come in two formats:
+  // 1. Legacy JWT format: long string with dots (e.g., eyJhbGc...)
+  // 2. New sb_publishable format: sb_publishable_XXXXX_YYYYY_ZZZZZ
   if (supabaseKey) {
-    if (!supabaseKey.includes('.')) {
-      warnings.push('EXPO_PUBLIC_SUPABASE_ANON_KEY does not appear to be a valid JWT key');
+    const looksLikeJwt = supabaseKey.includes('.');
+    const looksLikeSbPublishable = supabaseKey.startsWith('sb_publishable_');
+    if (!looksLikeJwt && !looksLikeSbPublishable) {
+      warnings.push('EXPO_PUBLIC_SUPABASE_ANON_KEY does not appear to be a valid key (expected JWT format or sb_publishable_ prefix)');
     }
   }
 

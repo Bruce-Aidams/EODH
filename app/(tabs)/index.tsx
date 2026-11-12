@@ -5,8 +5,8 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  ActivityIndicator,
   StatusBar,
+  ActivityIndicator,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,18 +21,32 @@ import { useTheme } from '@/lib/theme/ThemeContext';
 import Button from '@/components/Button';
 import EmptyState from '@/components/EmptyState';
 import { SectionHeader } from '@/components/SectionHeader';
+import SearchBar from '@/components/SearchBar';
 import { AnimatedView } from '@/components/AnimatedView';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { SkeletonCard, SkeletonList } from '@/components/Skeleton';
+import { useHaptics } from '@/lib/haptics';
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { user, isAuthenticated, isLoading } = useAuthStore();
-  const { books, featuredBooks, recentlyOpened, recentlyListened, fetchBooks, fetchFeaturedBooks, fetchRecentlyOpened, fetchRecentlyListened } = useLibraryStore();
+  const user = useAuthStore((s) => s.user);
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const isLoading = useAuthStore((s) => s.isLoading);
+  const books = useLibraryStore((s) => s.books);
+  const featuredBooks = useLibraryStore((s) => s.featuredBooks);
+  const recentlyOpened = useLibraryStore((s) => s.recentlyOpened);
+  const recentlyListened = useLibraryStore((s) => s.recentlyListened);
+  const fetchBooks = useLibraryStore((s) => s.fetchBooks);
+  const fetchFeaturedBooks = useLibraryStore((s) => s.fetchFeaturedBooks);
+  const fetchRecentlyOpened = useLibraryStore((s) => s.fetchRecentlyOpened);
+  const fetchRecentlyListened = useLibraryStore((s) => s.fetchRecentlyListened);
   const { isOffline } = useNetworkStatus();
   const { colors, isDark } = useTheme();
+  const { haptic } = useHaptics();
   const dimensions = useResponsiveDimensions();
   const insets = useSafeAreaInsets();
   const [ready, setReady] = useState(false);
+  const [dataLoaded, setDataLoaded] = useState(false);
 
   // Set ready state when auth loads
   useEffect(() => {
@@ -45,12 +59,15 @@ export default function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
       if (!isLoading) {
+        setDataLoaded(false);
         Promise.all([
           fetchBooks(),
           fetchFeaturedBooks(),
           fetchRecentlyOpened(),
           fetchRecentlyListened()
-        ]);
+        ]).then(() => {
+          setDataLoaded(true);
+        });
       }
     }, [isLoading, fetchBooks, fetchFeaturedBooks, fetchRecentlyOpened, fetchRecentlyListened])
   );
@@ -87,52 +104,79 @@ export default function HomeScreen() {
 
       {/* Offline Indicator */}
       {isOffline && (
-        <View style={[styles.offlineBanner, { backgroundColor: COLORS.error }]}>
-          <Ionicons name="wifi" size={16} color="#FFFFFF" />
+        <View style={[styles.offlineBanner, { backgroundColor: colors.error }]}>
+          <Ionicons name="wifi" size={14} color="#FFFFFF" />
           <Text style={styles.offlineBannerText}>You are offline — showing cached content</Text>
         </View>
       )}
 
-      {/* Gradient Header */}
-      <View style={[styles.gradientHeader, { backgroundImage: toGradientCSS(isDark ? GRADIENTS.dark : GRADIENTS.primary, 'diagonal'), paddingTop: insets.top + SPACING.md }]}>
-        <View style={styles.header}>
-          <View style={styles.headerLeft}>
-            <Text style={styles.greeting} numberOfLines={1}>{greeting}, {displayName}</Text>
-            <Text style={styles.subtitle} numberOfLines={1}>What would you like to read today?</Text>
-          </View>
-          {isAuthenticated ? (
-            <TouchableOpacity
-              style={styles.profileButton}
-              onPress={() => router.push('/(tabs)/more')}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="person-circle-outline" size={40} color={COLORS.white} />
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity
-              style={styles.signInButton}
-              onPress={() => router.push('/auth/sign-in')}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.signInButtonText}>Sign In</Text>
-            </TouchableOpacity>
-          )}
+      {/* Clean Header */}
+      <View style={[styles.header, { paddingTop: insets.top + 12, paddingBottom: 12 }]}>
+        <View style={styles.headerLeft}>
+          <Text style={[styles.greeting, { color: colors.text }]}>{greeting}</Text>
+          <Text style={[styles.subtitle, { color: colors.textSecondary }]}>{displayName}</Text>
         </View>
-
-        {/* Modern Search Bar */}
-        <TouchableOpacity
-          style={styles.searchBar}
-          onPress={() => router.push('/search')}
-          activeOpacity={0.8}
-        >
-          <Ionicons name="search" size={20} color="rgba(255,255,255,0.6)" />
-          <Text style={styles.searchPlaceholder}>Search by title or author...</Text>
-        </TouchableOpacity>
+        {isAuthenticated ? (
+          <TouchableOpacity
+            style={[styles.avatarButton, { backgroundColor: colors.surfaceVariant }]}
+            onPress={() => router.push('/(tabs)/more')}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.avatarText, { color: colors.primary }]}>
+              {displayName.charAt(0).toUpperCase()}
+            </Text>
+          </TouchableOpacity>
+        ) : (
+          <Button
+            title="Sign In"
+            variant="outline"
+            size="small"
+            onPress={() => router.push('/auth/sign-in')}
+          />
+        )}
       </View>
 
+      {/* Search Bar */}
+      <TouchableOpacity onPress={() => router.push('/search')} activeOpacity={0.7} style={styles.searchWrapper}>
+        <View style={[styles.searchBar, { backgroundColor: colors.surfaceVariant, borderColor: colors.border }]}>
+          <Ionicons name="search" size={18} color={colors.textMuted} />
+          <Text style={[styles.searchPlaceholder, { color: colors.textMuted }]}>Search by title or author...</Text>
+        </View>
+      </TouchableOpacity>
+
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + SPACING.xxl + 20 }]} keyboardShouldPersistTaps="handled">
+        {/* Skeleton Loading */}
+        {!dataLoaded && (
+          <View style={styles.skeletonSection}>
+            <View style={styles.skeletonSectionHeader}>
+              <SkeletonCard imageWidth="100%" imageHeight={160} titleLines={0} subtitleLines={0} />
+            </View>
+            <View style={styles.skeletonRow}>
+              {Array.from({ length: 4 }).map((_, i) => (
+                <SkeletonCard
+                  key={i}
+                  imageWidth={dimensions.bookCardWidth}
+                  imageHeight={dimensions.bookCardWidth * 1.4}
+                  titleLines={2}
+                  subtitleLines={1}
+                />
+              ))}
+            </View>
+            <View style={styles.skeletonGrid}>
+              {Array.from({ length: 6 }).map((_, i) => (
+                <SkeletonCard
+                  key={i}
+                  imageWidth={dimensions.bookCardCompactWidth}
+                  imageHeight={dimensions.bookCardCompactWidth * 1.4}
+                  titleLines={2}
+                  subtitleLines={1}
+                />
+              ))}
+            </View>
+          </View>
+        )}
         {/* Continue Reading */}
-        {recentlyOpened.length > 0 && (
+        {dataLoaded && recentlyOpened.length > 0 && (
           <AnimatedView style={styles.section} fadeDelay={100} fadeDuration={400} slideDirection="up" slideDistance={20}>
             <SectionHeader
               title="Continue Reading"
@@ -152,7 +196,7 @@ export default function HomeScreen() {
         )}
 
         {/* Continue Listening */}
-        {recentlyListened.length > 0 && (
+        {dataLoaded && recentlyListened.length > 0 && (
           <AnimatedView style={styles.section} fadeDelay={200} fadeDuration={400} slideDirection="up" slideDistance={20}>
             <SectionHeader
               title="Continue Listening"
@@ -172,7 +216,7 @@ export default function HomeScreen() {
         )}
 
         {/* Featured Books */}
-        {featuredBooks.length > 0 && (
+        {dataLoaded && featuredBooks.length > 0 && (
           <AnimatedView style={styles.section} fadeDelay={300} fadeDuration={400} slideDirection="up" slideDistance={20}>
             <SectionHeader
               title="Featured"
@@ -192,7 +236,7 @@ export default function HomeScreen() {
         )}
 
         {/* New Additions */}
-        {books.length > 0 && (
+        {dataLoaded && books.length > 0 && (
           <AnimatedView style={styles.section} fadeDelay={400} fadeDuration={400} slideDirection="up" slideDistance={20}>
             <SectionHeader title="New Additions" showSeeAll={false} />
             <View style={styles.grid}>
@@ -206,7 +250,7 @@ export default function HomeScreen() {
         )}
 
         {/* Empty State */}
-        {books.length === 0 && recentlyOpened.length === 0 && featuredBooks.length === 0 && (
+        {dataLoaded && books.length === 0 && recentlyOpened.length === 0 && featuredBooks.length === 0 && (
           <EmptyState icon="book-outline" title="No Books Yet" subtitle="Books will appear here when added by the administrator." />
         )}
       </ScrollView>
@@ -227,16 +271,16 @@ const BookCard = React.memo(function BookCard({ book, compact }: { book: any; co
       onPress={() => router.push(`/book/${book.id}`)}
       activeOpacity={0.7}
     >
-      <View style={[styles.bookCover, { width, height: coverHeight }]}>
+      <View style={[styles.bookCover, { width, height: coverHeight, backgroundColor: colors.surfaceVariant }]}>
         <LazyImage
           uri={book.cover_url || undefined}
           width={width}
           height={coverHeight}
-          borderRadius={BORDER_RADIUS.lg}
+          borderRadius={BORDER_RADIUS.md}
         />
         {book.has_audio && (
           <View style={styles.audioBadge}>
-            <Ionicons name="headset" size={12} color={COLORS.white} />
+            <Ionicons name="headset" size={10} color={COLORS.white} />
           </View>
         )}
       </View>
@@ -262,15 +306,15 @@ const ListeningBookCard = React.memo(function ListeningBookCard({ book, progress
       accessibilityLabel={`Continue listening to ${book.title}`}
       accessibilityRole="button"
     >
-      <View style={[styles.bookCover, { width, height: coverHeight }]}>
+      <View style={[styles.bookCover, { width, height: coverHeight, backgroundColor: colors.surfaceVariant }]}>
         <LazyImage
           uri={book.cover_url || undefined}
           width={width}
           height={coverHeight}
-          borderRadius={BORDER_RADIUS.lg}
+          borderRadius={BORDER_RADIUS.md}
         />
         <View style={styles.playOverlay}>
-          <Ionicons name="play-circle" size={48} color="#FFFFFF" />
+          <Ionicons name="play-circle" size={40} color="#FFFFFF" />
         </View>
       </View>
       <Text style={[styles.bookTitle, { color: colors.text }]} numberOfLines={2}>{book.title}</Text>
@@ -290,7 +334,6 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    // paddingBottom is set dynamically with safe-area inset
   },
   loadingContainer: {
     flex: 1,
@@ -302,24 +345,24 @@ const styles = StyleSheet.create({
   },
   logoContainer: {
     alignItems: 'center',
-    marginBottom: SPACING.xl,
+    marginBottom: 24,
   },
   logoText: {
-    fontSize: FONT_SIZE.xxxl,
-    fontWeight: '800',
-    letterSpacing: 4,
+    fontSize: 28,
+    fontWeight: '700',
+    letterSpacing: 2,
     color: COLORS.white,
-    marginTop: SPACING.sm,
+    marginTop: 8,
   },
   tagline: {
-    fontSize: FONT_SIZE.lg,
-    letterSpacing: 2,
+    fontSize: 14,
+    letterSpacing: 1,
     color: 'rgba(255,255,255,0.7)',
-    marginTop: SPACING.sm,
-    fontWeight: '300',
+    marginTop: 6,
+    fontWeight: '400',
   },
   loader: {
-    marginTop: SPACING.xl,
+    marginTop: 24,
   },
   authContainer: {
     flex: 1,
@@ -328,157 +371,165 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: SPACING.xl,
+    padding: 24,
   },
   authSubtitle: {
-    fontSize: FONT_SIZE.md,
-    marginTop: SPACING.md,
+    fontSize: 14,
+    marginTop: 12,
     textAlign: 'center',
     color: 'rgba(255,255,255,0.6)',
   },
   authButtons: {
     width: '100%',
-    gap: SPACING.md,
-    marginTop: SPACING.xxl,
-  },
-  gradientHeader: {
-    paddingHorizontal: SPACING.md,
-    paddingBottom: SPACING.lg,
-  },
-  signInButton: {
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-    borderRadius: BORDER_RADIUS.full,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-  },
-  signInButtonText: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: COLORS.white,
+    gap: 12,
+    marginTop: 24,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: SPACING.md,
+    paddingHorizontal: 16,
   },
   headerLeft: {
     flex: 1,
   },
   greeting: {
-    fontSize: FONT_SIZE.xxl,
-    fontWeight: '800',
-    color: COLORS.white,
+    fontSize: 22,
+    fontWeight: '700',
+    letterSpacing: 0.2,
   },
   subtitle: {
-    fontSize: FONT_SIZE.md,
-    color: 'rgba(255,255,255,0.7)',
+    fontSize: 14,
     marginTop: 2,
+  },
+  avatarButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarText: {
+    fontSize: 14,
+    fontWeight: '600',
   },
   offlineBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 6,
-    paddingHorizontal: SPACING.md,
-    gap: SPACING.xs,
+    paddingHorizontal: 12,
+    gap: 6,
   },
   offlineBannerText: {
-    fontSize: FONT_SIZE.sm,
+    fontSize: 12,
     fontWeight: '500',
     color: '#FFFFFF',
   },
-  profileButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+  searchWrapper: {
+    paddingHorizontal: 16,
+    paddingBottom: 8,
   },
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.md,
-    borderRadius: BORDER_RADIUS.xl,
-    backgroundColor: 'rgba(255,255,255,0.15)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: BORDER_RADIUS.md,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
+    gap: 8,
   },
   searchPlaceholder: {
-    marginLeft: SPACING.sm,
-    fontSize: FONT_SIZE.md,
-    color: 'rgba(255,255,255,0.6)',
+    fontSize: 14,
   },
   section: {
-    marginBottom: SPACING.lg,
+    marginBottom: 16,
   },
   horizontalScroll: {
-    paddingHorizontal: SPACING.md,
+    paddingHorizontal: 16,
+    gap: 12,
   },
   bookCard: {
-    marginRight: SPACING.md,
+    marginRight: 12,
     maxWidth: '85%',
   },
   bookCover: {
-    borderRadius: BORDER_RADIUS.lg,
+    borderRadius: BORDER_RADIUS.md,
     overflow: 'hidden',
-    marginBottom: SPACING.sm,
-    ...SHADOWS.card,
+    marginBottom: 6,
   },
   audioBadge: {
     position: 'absolute',
-    top: SPACING.sm,
-    right: SPACING.sm,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    backgroundColor: COLORS.royalPurple,
+    top: 6,
+    right: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0,0,0,0.5)',
     flexDirection: 'row',
     alignItems: 'center',
   },
   bookTitle: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
+    fontSize: 13,
+    fontWeight: '500',
     marginTop: 2,
     lineHeight: 16,
   },
   bookAuthor: {
-    fontSize: FONT_SIZE.xs,
-    marginTop: 2,
+    fontSize: 12,
+    marginTop: 1,
   },
   playOverlay: {
     ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.3)',
+    backgroundColor: 'rgba(0,0,0,0.25)',
   },
   progressContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     marginTop: 4,
-    gap: SPACING.xs,
+    gap: 6,
   },
   progressBar: {
     flex: 1,
-    height: 4,
+    height: 3,
     borderRadius: 2,
   },
   progressFill: {
     height: '100%',
     borderRadius: 2,
-    backgroundColor: COLORS.royalPurple,
+    backgroundColor: COLORS.brand,
   },
   progressText: {
-    fontSize: FONT_SIZE.xs,
-    minWidth: 30,
+    fontSize: 11,
+    minWidth: 28,
   },
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
-    paddingHorizontal: SPACING.md,
+    paddingHorizontal: 16,
+    gap: 12,
   },
   gridItem: {
     width: '48%',
-    marginBottom: SPACING.md,
+  },
+  skeletonSection: {
+    paddingHorizontal: 16,
+    gap: 16,
+  },
+  skeletonSectionHeader: {
+    marginBottom: 12,
+  },
+  skeletonRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  skeletonGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    gap: 12,
   },
 });

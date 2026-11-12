@@ -25,7 +25,8 @@ import { useAnimatedFade } from '@/hooks/useAnimatedFade';
 
 export default function SignInScreen() {
   const router = useRouter();
-  const { signIn, isLoading } = useAuthStore();
+  const signIn = useAuthStore((s) => s.signIn);
+  const isLoading = useAuthStore((s) => s.isLoading);
   const { showSuccess, showError } = useToast();
   const { isDark, colors } = useTheme();
   const [email, setEmail] = useState('');

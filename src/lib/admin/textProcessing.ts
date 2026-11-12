@@ -29,6 +29,9 @@ export interface ProcessingResult {
   isScanned: boolean;
   needsOcr: boolean;
   error: string | null;
+  coverImageBase64?: string; // Extracted cover image (EPUB)
+  coverMimeType?: string; // MIME type of extracted cover
+  metadata?: { [key: string]: string }; // Extracted metadata (EPUB)
 }
 
 export interface ProcessingProgress {
@@ -53,6 +56,9 @@ interface EdgeFunctionResponse {
   isScanned?: boolean;
   needsOcr?: boolean;
   error?: string;
+  coverImage?: string; // Base64 cover image (EPUB)
+  coverMimeType?: string; // MIME type of cover image (EPUB)
+  metadata?: { [key: string]: string }; // Additional metadata (EPUB)
 }
 
 /**
@@ -106,6 +112,9 @@ export async function processDocument(
     let fullText = '';
     let edgeChapters: EdgeFunctionChapter[] = [];
     let totalPages = 0;
+    let coverImageBase64: string | undefined;
+    let coverMimeType: string | undefined;
+    let metadata: { [key: string]: string } | undefined;
 
     // Stage 1: Extract text via Edge Function
     onProgress?.({
@@ -121,6 +130,9 @@ export async function processDocument(
       totalPages = edgeResponse.totalPages || 0;
       result.isScanned = edgeResponse.isScanned || false;
       result.needsOcr = edgeResponse.needsOcr || false;
+      coverImageBase64 = edgeResponse.coverImage;
+      coverMimeType = edgeResponse.coverMimeType;
+      metadata = edgeResponse.metadata;
     } catch (err: any) {
       // Fallback: for Markdown, try client-side processing
       if (book.document_type === 'markdown') {
@@ -344,6 +356,9 @@ export async function processDocument(
     });
 
     result.success = true;
+    result.coverImageBase64 = coverImageBase64;
+    result.coverMimeType = coverMimeType;
+    result.metadata = metadata;
 
   } catch (error: any) {
     result.error = error?.message || 'Processing failed';

@@ -120,17 +120,12 @@ export function useAudioQueue(callbacks?: AudioQueueCallbacks) {
 
   // Prepend segments (replace queue)
   const loadQueue = useCallback((segments: AudioSegment[], startIndex: number = 0) => {
-    let shuffledOrder = [];
-    if (true) {
-      shuffledOrder = generateShuffledOrder(segments.length);
-    }
-
     const newState = {
       segments,
       currentIndex: startIndex,
       isShuffled: false,
       repeatMode: 'none' as RepeatMode,
-      shuffledOrder,
+      shuffledOrder: [],
     };
 
     setState(newState);

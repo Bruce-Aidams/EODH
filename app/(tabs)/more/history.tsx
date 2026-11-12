@@ -30,7 +30,7 @@ interface HistoryItem {
 
 export default function HistoryScreen() {
   const router = useRouter();
-  const { books } = useLibraryStore();
+  const books = useLibraryStore((s) => s.books);
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const [history, setHistory] = useState<HistoryItem[]>([]);

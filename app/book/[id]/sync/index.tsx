@@ -39,12 +39,10 @@ interface SentenceItemProps {
   index: number;
   isHighlighted: boolean;
   useWordLevel: boolean;
-  highlightedWordMap: Map<string, string>;
+  highlightedWordKey: string | null;
   themeColors: { text: string; highlight: string };
   readingSettings: { fontSize: number; lineSpacing: number };
   colors: any;
-  useTTS: boolean;
-  content: string;
   onSentenceTap: (index: number) => void;
 }
 
@@ -53,12 +51,10 @@ const SentenceItem = memo(function SentenceItem({
   index,
   isHighlighted,
   useWordLevel,
-  highlightedWordMap,
+  highlightedWordKey,
   themeColors,
   readingSettings,
   colors,
-  useTTS,
-  content,
   onSentenceTap,
 }: SentenceItemProps) {
   const sentenceTrimmed = sentence.trim();
@@ -69,7 +65,7 @@ const SentenceItem = memo(function SentenceItem({
       activeOpacity={0.6}
       hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
     >
-      {(!useWordLevel || !isHighlighted || !highlightedWordMap.has(sentenceTrimmed)) ? (
+      {(!useWordLevel || !isHighlighted || !highlightedWordKey) ? (
         <Text
           style={[
             styles.sentence,
@@ -102,7 +98,7 @@ const SentenceItem = memo(function SentenceItem({
           {sentence.split(/(\s+)/).map((word, wIndex) => {
             const trimmedWord = word.trim();
             if (!trimmedWord) return <Text key={`ws-${wIndex}`}>{word}</Text>;
-            const highlightedWord = highlightedWordMap.get(sentenceTrimmed)!;
+            const highlightedWord = highlightedWordKey.split('=')[1];
             const isCurrentWord = trimmedWord === highlightedWord;
             return (
               <Text
@@ -159,21 +155,20 @@ function stripHtml(html: string): string {
 export default function SyncReaderScreen() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
-  const { updateListeningProgress, updateReadingProgress } = useLibraryStore();
-  const { readingSettings } = useSettingsStore();
-  const { audioSettings } = useSettingsStore();
+  const updateListeningProgress = useLibraryStore((s) => s.updateListeningProgress);
+  const updateReadingProgress = useLibraryStore((s) => s.updateReadingProgress);
+  const readingSettings = useSettingsStore((s) => s.readingSettings);
+  const audioSettings = useSettingsStore((s) => s.audioSettings);
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
-  const {
-    isPlaying: storeIsPlaying,
-    isSyncing,
-    highlightedText,
-    currentPage,
-    startSync,
-    stopSync,
-    updateSyncState,
-    reset,
-  } = useAudioStore();
+  const storeIsPlaying = useAudioStore((s) => s.isPlaying);
+  const isSyncing = useAudioStore((s) => s.isSyncing);
+  const highlightedText = useAudioStore((s) => s.highlightedText);
+  const currentPage = useAudioStore((s) => s.currentPage);
+  const startSync = useAudioStore((s) => s.startSync);
+  const stopSync = useAudioStore((s) => s.stopSync);
+  const updateSyncState = useAudioStore((s) => s.updateSyncState);
+  const reset = useAudioStore((s) => s.reset);
 
   const [book, setBook] = useState<Book | null>(null);
   const [loading, setLoading] = useState(true);
@@ -199,6 +194,28 @@ export default function SyncReaderScreen() {
   const sentenceRefs = useRef<any[]>([]);
   const autoScrollTimerRef = useRef<number | null>(null);
   const bookIdRef = useRef<string>('');
+  
+  // Stable refs for callbacks — prevents recreating the audio player on every render
+  const audioSettingsRef = useRef(audioSettings);
+  audioSettingsRef.current = audioSettings;
+  const contentRef = useRef(content);
+  contentRef.current = content;
+  const useTTSRef = useRef(useTTS);
+  useTTSRef.current = useTTS;
+  const bookSegmentsRef = useRef(bookSegments);
+  bookSegmentsRef.current = bookSegments;
+  const bookAlignmentsRef = useRef(bookAlignments);
+  bookAlignmentsRef.current = bookAlignments;
+  const ttsEstimatedTimingsRef = useRef(ttsEstimatedTimings);
+  ttsEstimatedTimingsRef.current = ttsEstimatedTimings;
+  const totalDurationRef = useRef(totalDuration);
+  totalDurationRef.current = totalDuration;
+  const globalTimeRef = useRef(globalTime);
+  globalTimeRef.current = globalTime;
+  const stopSyncRef = useRef(stopSync);
+  stopSyncRef.current = stopSync;
+  const startSyncRef = useRef(startSync);
+  startSyncRef.current = startSync;
 
   const bookId = Array.isArray(id) ? id[0] : id;
 
@@ -229,6 +246,34 @@ export default function SyncReaderScreen() {
   const currentSegment = bookSegments[currentSegmentIndex] || null;
   const currentAudioUri = resolvedAudioUris[currentSegmentIndex] || currentSegment?.audio_url || null;
 
+  // Stabilized callbacks for audio player — use refs to avoid stale closures
+  const playerCallbacks = useMemo(() => ({
+    onPositionChange: (time: number) => {
+      const seg = currentSegmentRef.current;
+      if (seg) {
+        const newGlobalTime = seg.start_time + time;
+        setGlobalTime(newGlobalTime);
+        syncEngine.updateTime(newGlobalTime);
+      }
+    },
+    onDurationChange: () => {},
+    onBufferingChange: () => {},
+    onPlay: () => {
+      useAudioStore.setState({ isPlaying: true });
+    },
+    onPause: () => {
+      useAudioStore.setState({ isPlaying: false });
+    },
+    onPlaybackEnd: () => {
+      if (currentSegmentIndexRef.current < bookSegmentsRef.current.length - 1) {
+        // Will be handled by segment index change
+      } else {
+        useAudioStore.setState({ isPlaying: false });
+        stopSyncRef.current();
+      }
+    },
+  }) as any, []);
+
   // Real audio player — keyed on segment so it reloads when segment changes
   const {
     isPlaying: audioIsPlaying,
@@ -243,32 +288,22 @@ export default function SyncReaderScreen() {
   } = useCompleteAudioPlayer(
     useTTS ? null : currentAudioUri,
     audioSettings.playbackSpeed,
-    {
-      onPositionChange: (time: number) => {
-        if (currentSegment) {
-          const newGlobalTime = currentSegment.start_time + time;
-          setGlobalTime(newGlobalTime);
-          syncEngine.updateTime(newGlobalTime);
-        }
-      },
-      onDurationChange: () => {},
-      onBufferingChange: () => {},
-      onPlay: () => {
-        useAudioStore.setState({ isPlaying: true });
-      },
-      onPause: () => {
-        useAudioStore.setState({ isPlaying: false });
-      },
-      onPlaybackEnd: () => {
-        if (currentSegmentIndex < bookSegments.length - 1) {
-          // Will be handled by segment index change
-        } else {
-          useAudioStore.setState({ isPlaying: false });
-          stopSync();
-        }
-      },
-    } as any
+    playerCallbacks
   );
+
+  // Refs for values that depend on the audio player hook — placed after the hook call
+  const currentSegmentRef = useRef(currentSegment);
+  currentSegmentRef.current = currentSegment;
+  const currentSegmentIndexRef = useRef(currentSegmentIndex);
+  currentSegmentIndexRef.current = currentSegmentIndex;
+  const audioPauseRef = useRef(audioPause);
+  audioPauseRef.current = audioPause;
+  const audioPlayRef = useRef(audioPlay);
+  audioPlayRef.current = audioPlay;
+  const audioSeekToRef = useRef(audioSeekTo);
+  audioSeekToRef.current = audioSeekTo;
+  const audioSetPlaybackRateRef = useRef(audioSetPlaybackRate);
+  audioSetPlaybackRateRef.current = audioSetPlaybackRate;
 
   // Sync store state with real player
   useEffect(() => {
@@ -278,6 +313,12 @@ export default function SyncReaderScreen() {
   }, [audioIsPlaying, useTTS]);
 
   // Initialize sync engine when alignments are loaded (audio mode)
+  // Use refs for callback to avoid re-initializing on every render
+  const updateSyncStateRef = useRef(updateSyncState);
+  updateSyncStateRef.current = updateSyncState;
+  const globalTimeForSyncRef = useRef(0);
+  globalTimeForSyncRef.current = globalTime;
+
   useEffect(() => {
     if (!useTTS && bookAlignments.length > 0) {
       syncEngine.initialize({
@@ -287,10 +328,10 @@ export default function SyncReaderScreen() {
       });
 
       // Upgrade to word-level highlighting using estimated timings
-      syncEngine.upgradeToWordLevel(audioSettings.playbackSpeed);
+      syncEngine.upgradeToWordLevel(audioSettingsRef.current.playbackSpeed);
       setUseWordLevel(syncEngine.hasWordLevelData());
 
-      // Set up sync callbacks
+      // Set up sync callbacks — only once
       syncEngine.setCallbacks({
         onPositionChange: (position) => {
           setCurrentSyncPosition(position);
@@ -309,23 +350,29 @@ export default function SyncReaderScreen() {
             text_offset_end: position.textOffsetEnd,
             created_at: new Date().toISOString(),
           };
-          updateSyncState(alignment, globalTime);
+          updateSyncStateRef.current(alignment, globalTimeForSyncRef.current);
         },
       });
     }
   }, [bookAlignments, bookSegments, content, useTTS]);
 
   // Initialize TTS-based sync when content is loaded and no audio data exists
+  // Use refs to avoid re-registering TTS callbacks on every render
+  const updateReadingProgressRef = useRef(updateReadingProgress);
+  updateReadingProgressRef.current = updateReadingProgress;
+  const updateListeningProgressRef = useRef(updateListeningProgress);
+  updateListeningProgressRef.current = updateListeningProgress;
+
   useEffect(() => {
     if (useTTS && content) {
       // Generate estimated timings for TTS
-      const timings = SyncEngine.estimateTTSTimings(content, String(bookId), audioSettings.playbackSpeed);
+      const timings = SyncEngine.estimateTTSTimings(content, String(bookId), audioSettingsRef.current.playbackSpeed);
       setTtsEstimatedTimings(timings);
       
       // Pre-compute sentences for TTS callback (captured in closure)
       const sentenceList = content.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 0);
       
-      // Set up TTS callbacks
+      // Set up TTS callbacks — only once per content change
       ttsEngine.setOnChunkBegin((utterance) => {
         const searchText = utterance.trim().substring(0, 50).toLowerCase();
         
@@ -347,14 +394,15 @@ export default function SyncReaderScreen() {
               };
               setCurrentSyncPosition(position);
               
-              // Update progress
-              const progressPercent = totalDuration > 0 ? (timing.start_time / totalDuration) * 100 : 0;
-              updateReadingProgress({
+              // Update progress using refs to avoid stale closures
+              const totalDur = totalDurationRef.current;
+              const progressPercent = totalDur > 0 ? (timing.start_time / totalDur) * 100 : 0;
+              updateReadingProgressRef.current({
                 book_id: bookIdRef.current,
                 page_number: 1,
                 progress_percent: Math.min(progressPercent, 100),
               });
-              updateListeningProgress({
+              updateListeningProgressRef.current({
                 book_id: bookIdRef.current,
                 current_time: timing.start_time,
                 progress_percent: Math.min(progressPercent, 100),
@@ -368,7 +416,7 @@ export default function SyncReaderScreen() {
       ttsEngine.setOnDone(() => {
         setTtsIsPlaying(false);
         useAudioStore.setState({ isPlaying: false });
-        stopSync();
+        stopSyncRef.current();
         setCurrentSyncPosition(null);
         setTtsCurrentSentenceIndex(-1);
       });
@@ -495,130 +543,146 @@ export default function SyncReaderScreen() {
   }, [globalTime, useWordLevel, isPlaying]);
 
   const handlePlayPause = useCallback(() => {
-    if (!content || content.startsWith('No content available')) return;
+    const currentContent = contentRef.current;
+    if (!currentContent || currentContent.startsWith('No content available')) return;
+    const currentUseTTS = useTTSRef.current;
+    const currentIsPlaying = isPlaying;
 
-    if (isPlaying) {
-      if (useTTS) {
+    if (currentIsPlaying) {
+      if (currentUseTTS) {
         ttsEngine.pause();
         setTtsIsPlaying(false);
-        stopSync();
+        stopSyncRef.current();
       } else {
-        audioPause();
-        stopSync();
+        audioPauseRef.current();
+        stopSyncRef.current();
         syncEngine.stop();
       }
     } else {
-      startSync();
-      if (useTTS) {
+      startSyncRef.current();
+      if (currentUseTTS) {
         // Start TTS from current position
         const fromIndex = ttsCurrentSentenceIndex >= 0 ? ttsCurrentSentenceIndex + 1 : 0;
-        ttsEngine.configure({ rate: audioSettings.playbackSpeed });
-        ttsEngine.loadText(content);
+        ttsEngine.configure({ rate: audioSettingsRef.current.playbackSpeed });
+        ttsEngine.loadText(currentContent);
         ttsEngine.speak(fromIndex);
         setTtsIsPlaying(true);
         syncEngine.start();
       } else {
         syncEngine.start();
-        audioPlay();
+        audioPlayRef.current();
       }
     }
-  }, [isPlaying, useTTS, content, audioSettings.playbackSpeed, ttsCurrentSentenceIndex, startSync, stopSync, audioPlay, audioPause]);
+  }, [isPlaying, ttsCurrentSentenceIndex]);
 
   const handleSeek = useCallback((value: number) => {
-    if (useTTS) {
+    const currentUseTTS = useTTSRef.current;
+    if (currentUseTTS) {
       // For TTS, find the sentence at this time and seek to it
-      const timing = ttsEstimatedTimings.find(t => value >= t.start_time && value < t.end_time);
+      const timings = ttsEstimatedTimingsRef.current;
+      const timing = timings.find(t => value >= t.start_time && value < t.end_time);
       if (timing) {
-        const index = ttsEstimatedTimings.indexOf(timing);
+        const index = timings.indexOf(timing);
         setTtsCurrentSentenceIndex(index);
         ttsEngine.stop();
-        ttsEngine.loadText(content);
+        ttsEngine.loadText(contentRef.current);
         ttsEngine.speak(index);
         setTtsIsPlaying(true);
       }
-    } else if (bookSegments.length > 0) {
-      // Audio mode: map global time to segment-local time
-      let accumulatedTime = 0;
-      for (const seg of bookSegments) {
-        const segDuration = seg.end_time - seg.start_time;
-        if (value >= accumulatedTime && value < accumulatedTime + segDuration) {
-          const localTime = value - accumulatedTime;
-          setGlobalTime(value);
-          audioSeekTo(localTime);
-          return;
+    } else {
+      const segs = bookSegmentsRef.current;
+      if (segs.length > 0) {
+        // Audio mode: map global time to segment-local time
+        let accumulatedTime = 0;
+        for (const seg of segs) {
+          const segDuration = seg.end_time - seg.start_time;
+          if (value >= accumulatedTime && value < accumulatedTime + segDuration) {
+            const localTime = value - accumulatedTime;
+            setGlobalTime(value);
+            audioSeekToRef.current(localTime);
+            return;
+          }
+          accumulatedTime += segDuration;
         }
-        accumulatedTime += segDuration;
       }
     }
-  }, [useTTS, ttsEstimatedTimings, content, bookSegments]);
+  }, []);
 
   const handleSpeedChange = useCallback(() => {
     const speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
-    const currentIndex = speeds.indexOf(audioSettings.playbackSpeed);
+    const currentSpeed = audioSettingsRef.current.playbackSpeed;
+    const currentIndex = speeds.indexOf(currentSpeed);
     const nextSpeed = speeds[(currentIndex + 1) % speeds.length];
     useSettingsStore.setState((s) => ({
       ...s,
       audioSettings: { ...s.audioSettings, playbackSpeed: nextSpeed },
     }));
 
-    if (useTTS) {
+    if (useTTSRef.current) {
       ttsEngine.configure({ rate: nextSpeed });
     } else {
-      audioSetPlaybackRate(nextSpeed);
+      audioSetPlaybackRateRef.current(nextSpeed);
     }
-  }, [useTTS, audioSettings.playbackSpeed]);
+  }, []);
 
   const handleSkipForward = useCallback(() => {
-    if (useTTS) {
-      const nextIndex = Math.min(ttsCurrentSentenceIndex + 1, sentences.length - 1);
+    const currentUseTTS = useTTSRef.current;
+    if (currentUseTTS) {
+      const sentencesLen = sentences.length;
+      const nextIndex = Math.min(ttsCurrentSentenceIndex + 1, sentencesLen - 1);
       setTtsCurrentSentenceIndex(nextIndex);
       ttsEngine.stop();
-      ttsEngine.loadText(content);
+      ttsEngine.loadText(contentRef.current);
       ttsEngine.speak(nextIndex);
     } else {
-      const newTime = Math.min(globalTime + 10, totalDuration);
+      const newTime = Math.min(globalTimeRef.current + 10, totalDurationRef.current);
       handleSeek(newTime);
     }
-  }, [useTTS, ttsCurrentSentenceIndex, sentences.length, content, globalTime, totalDuration]);
+  }, [ttsCurrentSentenceIndex, sentences.length, handleSeek]);
 
   const handleSkipBackward = useCallback(() => {
-    if (useTTS) {
+    const currentUseTTS = useTTSRef.current;
+    if (currentUseTTS) {
       const prevIndex = Math.max(ttsCurrentSentenceIndex - 1, 0);
       setTtsCurrentSentenceIndex(prevIndex);
       ttsEngine.stop();
-      ttsEngine.loadText(content);
+      ttsEngine.loadText(contentRef.current);
       ttsEngine.speak(prevIndex);
     } else {
-      const newTime = Math.max(globalTime - 10, 0);
+      const newTime = Math.max(globalTimeRef.current - 10, 0);
       handleSeek(newTime);
     }
-  }, [useTTS, ttsCurrentSentenceIndex, content, globalTime]);
+  }, [ttsCurrentSentenceIndex, handleSeek]);
 
-  // Lock-screen media controls
-  useMediaControls({
-    title: book?.title || 'Unknown',
-    artist: book?.author || 'Unknown',
-    album: 'EODH Audiobooks',
-    isPlaying,
-    onPlay: () => handlePlayPause(),
-    onPause: () => handlePlayPause(),
-    onNext: handleSkipForward,
-    onPrevious: handleSkipBackward,
-    onSeek: (position) => handleSeek(position),
-    onStop: () => {
-      handlePlayPause();
-      if (useTTS) {
-        setTtsCurrentSentenceIndex(-1);
-      }
-      handleSeek(0);
-    },
-  });
+  // Lock-screen media controls — memoized to avoid recreating on every render
+  const mediaControlsOptions = useMemo(
+    () => ({
+      title: book?.title || 'Unknown',
+      artist: book?.author || 'Unknown',
+      album: 'EODH Audiobooks',
+      isPlaying,
+      onPlay: () => handlePlayPause(),
+      onPause: () => handlePlayPause(),
+      onNext: handleSkipForward,
+      onPrevious: handleSkipBackward,
+      onSeek: (position: number) => handleSeek(position),
+      onStop: () => {
+        handlePlayPause();
+        if (useTTSRef.current) {
+          setTtsCurrentSentenceIndex(-1);
+        }
+        handleSeek(0);
+      },
+    }),
+    [book?.title, book?.author, isPlaying, handlePlayPause, handleSkipForward, handleSkipBackward, handleSeek]
+  );
+  useMediaControls(mediaControlsOptions);
 
-  const formatTime = (seconds: number): string => {
+  const formatTime = useCallback((seconds: number): string => {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
+  }, []);
 
   const getThemeColors = () => {
     switch (readingSettings.theme) {
@@ -668,24 +732,33 @@ export default function SyncReaderScreen() {
     );
   }
 
-  // Build a map of sentence text to current word for word-level highlighting
-  const highlightedWordMap = useMemo(() => {
-    if (!useWordLevel || !currentWord || !currentSyncPosition) return new Map<string, string>();
-    return new Map([[currentSyncPosition.text.trim(), currentWord.word]]);
+  // Build a map of sentence text to current word for word-level highlighting — use a stable key instead of a new Map
+  const highlightedWordKey = useMemo(() => {
+    if (!useWordLevel || !currentWord || !currentSyncPosition) return null;
+    return currentSyncPosition.text.trim() + '=' + currentWord.word;
   }, [useWordLevel, currentWord, currentSyncPosition]);
 
   // Determine if content is available (memoized)
   const hasContent = useMemo(() => sentences.length > 0 && !content.startsWith('No content available'), [sentences.length, content]);
 
-  // Auto-scroll to keep highlighted text visible - uses memoized indices and FlatList scrollToIndex
+  // Auto-scroll to keep highlighted text visible - throttled to avoid excessive scrolls
+  // Use a ref to track last scrolled index to avoid redundant scrolls
+  const lastScrolledIndexRef = useRef<number | null>(null);
   useEffect(() => {
-    if (!currentSyncPosition) return;
+    if (!currentSyncPosition) {
+      lastScrolledIndexRef.current = null;
+      return;
+    }
 
     // Use the already-computed highlighted indices instead of re-splitting and searching
     const indicesToCheck = Array.from(highlightedSentenceIndices);
     if (indicesToCheck.length === 0) return;
 
     const index = indicesToCheck[0];
+    // Skip if we already scrolled to this index
+    if (lastScrolledIndexRef.current === index) return;
+    lastScrolledIndexRef.current = index;
+
     if (autoScrollTimerRef.current) {
       clearTimeout(autoScrollTimerRef.current);
     }
@@ -695,7 +768,7 @@ export default function SyncReaderScreen() {
         animated: true,
         viewPosition: 0.3,
       });
-    }, 200);
+    }, 150);
 
     return () => {
       if (autoScrollTimerRef.current) {
@@ -703,6 +776,32 @@ export default function SyncReaderScreen() {
       }
     };
   }, [currentSyncPosition, highlightedSentenceIndices]);
+
+  // Stable onSentenceTap handler using refs
+  const onSentenceTap = useCallback((idx: number) => {
+    if (useTTSRef.current) {
+      setTtsCurrentSentenceIndex(idx);
+      ttsEngine.stop();
+      ttsEngine.loadText(contentRef.current);
+      ttsEngine.speak(idx);
+      setTtsIsPlaying(true);
+    }
+  }, []);
+
+  // Stable renderItem callback for FlatList — prevents re-rendering all sentences on control toggle
+  const renderSentenceItem = useCallback(({ item: sentence, index }: { item: string; index: number }) => (
+    <SentenceItem
+      sentence={sentence}
+      index={index}
+      isHighlighted={highlightedSentenceIndices.has(index)}
+      useWordLevel={useWordLevel}
+      highlightedWordKey={highlightedWordKey}
+      themeColors={themeColors}
+      readingSettings={readingSettings}
+      colors={colors}
+      onSentenceTap={onSentenceTap}
+    />
+  ), [highlightedSentenceIndices, useWordLevel, highlightedWordKey, themeColors, readingSettings, colors, onSentenceTap]);
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={['left', 'right']}>
@@ -758,29 +857,12 @@ export default function SyncReaderScreen() {
             { paddingHorizontal: readingSettings.margins, paddingBottom: insets.bottom + SPACING.xxl + 20 },
           ]}
           showsVerticalScrollIndicator={false}
-          renderItem={({ item: sentence, index }) => (
-            <SentenceItem
-              sentence={sentence}
-              index={index}
-              isHighlighted={highlightedSentenceIndices.has(index)}
-              useWordLevel={useWordLevel}
-              highlightedWordMap={highlightedWordMap}
-              themeColors={themeColors}
-              readingSettings={readingSettings}
-              colors={colors}
-              useTTS={useTTS}
-              content={content}
-              onSentenceTap={(idx) => {
-                if (useTTS) {
-                  setTtsCurrentSentenceIndex(idx);
-                  ttsEngine.stop();
-                  ttsEngine.loadText(content);
-                  ttsEngine.speak(idx);
-                  setTtsIsPlaying(true);
-                }
-              }}
-            />
-          )}
+          renderItem={renderSentenceItem}
+          getItemLayout={(data, index) => ({
+            length: readingSettings.fontSize * readingSettings.lineSpacing * 1.5,
+            offset: readingSettings.fontSize * readingSettings.lineSpacing * 1.5 * index,
+            index,
+          })}
         />
         </View>
       </AnimatedView>

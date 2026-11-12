@@ -65,6 +65,22 @@ export interface AudioSegment {
   created_at: string;
 }
 
+export interface CustomVoice {
+  id: string;
+  user_id: string;
+  name: string;
+  audio_url: string;
+  language: string;
+  description: string | null;
+  duration_seconds: number | null;
+  file_size: number | null;
+  status: 'processing' | 'ready' | 'failed';
+  error_message: string | null;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AudioAlignment {
   id: string | undefined;
   segment_id: string | null;
@@ -215,3 +231,20 @@ export type SyncState = {
   currentPage: number;
   autoScroll: boolean;
 };
+
+// =====================================================
+// AI Summaries
+// =====================================================
+
+export type SummaryType = 'book_overview' | 'chapter_summary' | 'key_takeaways' | 'comprehension_questions' | 'flashcards';
+
+export interface AISummary {
+  id: string;
+  book_id: string;
+  chapter_id: string | null;
+  summary_type: SummaryType;
+  content: any;
+  model: string;
+  token_count: number;
+  generated_at: string;
+}

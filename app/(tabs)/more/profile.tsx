@@ -20,7 +20,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const { user, profile, updateProfile, signOut } = useAuthStore();
+  const user = useAuthStore((s) => s.user);
+  const profile = useAuthStore((s) => s.profile);
+  const updateProfile = useAuthStore((s) => s.updateProfile);
+  const signOut = useAuthStore((s) => s.signOut);
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const [isEditing, setIsEditing] = useState(false);

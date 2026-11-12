@@ -7,7 +7,7 @@ import {
   ViewStyle,
   TextStyle,
 } from 'react-native';
-import { BORDER_RADIUS, SPACING } from '@/constants/theme';
+import { BORDER_RADIUS } from '@/constants/theme';
 import { useTheme } from '@/lib/theme/ThemeContext';
 
 type ButtonVariant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger';
@@ -48,13 +48,13 @@ export default function Button({
     },
     secondary: {
       bg: colors.surfaceVariant,
-      border: 'transparent',
+      border: colors.border,
       text: colors.text,
     },
     outline: {
       bg: 'transparent',
-      border: colors.primary,
-      text: colors.primary,
+      border: colors.border,
+      text: colors.text,
     },
     ghost: {
       bg: 'transparent',
@@ -62,30 +62,27 @@ export default function Button({
       text: colors.primary,
     },
     danger: {
-      bg: colors.error,
+      bg: colors.errorBg,
       border: 'transparent',
-      text: '#FFFFFF',
+      text: colors.error,
     },
   };
 
   const sizeStyles = {
     small: {
-      paddingVertical: 8,
-      paddingHorizontal: SPACING.sm,
+      paddingVertical: 6,
+      paddingHorizontal: 12,
       fontSize: 12,
-      iconSize: 16,
     },
     medium: {
-      paddingVertical: SPACING.sm,
-      paddingHorizontal: SPACING.md,
+      paddingVertical: 8,
+      paddingHorizontal: 16,
       fontSize: 14,
-      iconSize: 18,
     },
     large: {
-      paddingVertical: SPACING.md,
-      paddingHorizontal: SPACING.lg,
-      fontSize: 16,
-      iconSize: 20,
+      paddingVertical: 10,
+      paddingHorizontal: 20,
+      fontSize: 15,
     },
   };
 
@@ -114,7 +111,7 @@ export default function Button({
         <ActivityIndicator color={vStyle.text} size="small" />
       ) : (
         <>
-          {icon && <React.Fragment>{icon}</React.Fragment>}
+          {icon}
           {title && (
             <Text style={[styles.text, { color: vStyle.text, fontSize: sStyle.fontSize }, textStyle]}>
               {title}
@@ -133,12 +130,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderRadius: BORDER_RADIUS.md,
     borderWidth: 1,
-    gap: SPACING.sm,
+    gap: 8,
   },
   fullWidth: {
     width: '100%',
   },
   text: {
-    fontWeight: '600',
+    fontWeight: '500',
+    letterSpacing: 0.2,
   },
 });

@@ -33,7 +33,8 @@ interface DownloadedBook {
 
 export default function DownloadsScreen() {
   const router = useRouter();
-  const { offlineMode, setOfflineMode } = useSettingsStore();
+  const offlineMode = useSettingsStore((s) => s.offlineMode);
+  const setOfflineMode = useSettingsStore((s) => s.setOfflineMode);
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const [downloads, setDownloads] = useState<DownloadedBook[]>([]);

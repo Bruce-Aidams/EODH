@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -40,15 +40,13 @@ export default function AudioPlayerScreen() {
   const router = useRouter();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
-  const { updateListeningProgress } = useLibraryStore();
-  const { audioSettings } = useSettingsStore();
-  const {
-    currentTime: storeTime,
-    setBufferStatus,
-    setPlaybackSpeed,
-    setSegments,
-    reset,
-  } = useAudioStore();
+  const updateListeningProgress = useLibraryStore((s) => s.updateListeningProgress);
+  const audioSettings = useSettingsStore((s) => s.audioSettings);
+  const storeTime = useAudioStore((s) => s.currentTime);
+  const setBufferStatus = useAudioStore((s) => s.setBufferStatus);
+  const setPlaybackSpeed = useAudioStore((s) => s.setPlaybackSpeed);
+  const setSegments = useAudioStore((s) => s.setSegments);
+  const reset = useAudioStore((s) => s.reset);
 
   const [book, setBook] = useState<Book | null>(null);
   const [loading, setLoading] = useState(true);
@@ -73,19 +71,91 @@ export default function AudioPlayerScreen() {
     setTotalDuration(total);
   }, [bookSegments]);
 
-  // Determine current segment index based on playback time
+  // Determine current segment index based on playback time — throttled to avoid rapid re-renders
+  // Use refs to avoid depending on currentSegmentIndex which would cause infinite loops
+  const segmentCheckRef = useRef<number>(0);
+  const storeTimeRef = useRef(storeTime);
+  storeTimeRef.current = storeTime;
+
   useEffect(() => {
     if (bookSegments.length === 0) return;
-    const time = storeTime;
+    const now = Date.now();
+    if (now - segmentCheckRef.current < 500) return;
+    segmentCheckRef.current = now;
+
+    const time = storeTimeRef.current;
     for (let i = bookSegments.length - 1; i >= 0; i--) {
       if (time >= bookSegments[i].start_time) {
-        if (i !== currentSegmentIndex) {
-          setCurrentSegmentIndex(i);
-        }
+        setCurrentSegmentIndex(i);
         break;
       }
     }
   }, [storeTime, bookSegments]);
+
+  // Stabilized refs for callbacks — initialized with no-ops, updated after the hook
+  const currentSegmentRef = useRef(currentSegment);
+  const currentSegmentIndexRef = useRef(currentSegmentIndex);
+  const bookSegmentsRef = useRef(bookSegments);
+  const repeatModeRef = useRef(repeatMode);
+  const seekToRef = useRef((_: number) => {});
+  const playRef = useRef(() => {});
+  const pauseRef = useRef(() => {});
+
+  const handleAudioPositionChange = useCallback((time: number) => {
+    const seg = currentSegmentRef.current;
+    if (seg) {
+      const globalTime = seg.start_time + time;
+      useAudioStore.setState({ currentTime: globalTime });
+    }
+  }, []);
+
+  const handleAudioDurationChange = useCallback((dur: number) => {
+    useAudioStore.setState({ duration: dur });
+  }, []);
+
+  const handleAudioBufferingChange = useCallback((buf: boolean) => {
+    setBufferStatus(buf ? 'buffering' : 'ready');
+  }, [setBufferStatus]);
+
+  const handleAudioPlay = useCallback(() => {
+    useAudioStore.setState({ isPlaying: true });
+  }, []);
+
+  const handleAudioPause = useCallback(() => {
+    useAudioStore.setState({ isPlaying: false });
+  }, []);
+
+  const handleAudioPlaybackEnd = useCallback(() => {
+    const mode = repeatModeRef.current;
+    if (mode === 'one') {
+      seekToRef.current(0);
+      playRef.current();
+      return;
+    }
+    const idx = currentSegmentIndexRef.current;
+    const segs = bookSegmentsRef.current;
+    if (idx < segs.length - 1) {
+      setCurrentSegmentIndex(idx + 1);
+    } else {
+      if (mode === 'all') {
+        setCurrentSegmentIndex(0);
+      } else {
+        useAudioStore.setState({ isPlaying: false });
+      }
+    }
+  }, []);
+
+  const audioCallbacks = useMemo(
+    () => ({
+      onPositionChange: handleAudioPositionChange,
+      onDurationChange: handleAudioDurationChange,
+      onBufferingChange: handleAudioBufferingChange,
+      onPlay: handleAudioPlay,
+      onPause: handleAudioPause,
+      onPlaybackEnd: handleAudioPlaybackEnd,
+    }),
+    [handleAudioPositionChange, handleAudioDurationChange, handleAudioBufferingChange, handleAudioPlay, handleAudioPause, handleAudioPlaybackEnd],
+  );
 
   // Real audio player hook — keyed on segment so it reloads when segment changes
   const {
@@ -103,53 +173,17 @@ export default function AudioPlayerScreen() {
   } = useCompleteAudioPlayer(
     currentAudioUri,
     audioSettings.playbackSpeed,
-    {
-      onPositionChange: (time) => {
-        // Map segment-local time to global time
-        if (currentSegment) {
-          const globalTime = currentSegment.start_time + time;
-          // Update store with global time
-          useAudioStore.setState({ currentTime: globalTime });
-        }
-      },
-      onDurationChange: (dur) => {
-        useAudioStore.setState({ duration: dur });
-      },
-      onBufferingChange: (buf) => {
-        setBufferStatus(buf ? 'buffering' : 'ready');
-      },
-      onPlay: () => {
-        useAudioStore.setState({ isPlaying: true });
-      },
-      onPause: () => {
-        useAudioStore.setState({ isPlaying: false });
-      },
-      onPlaybackEnd: () => {
-        // Handle repeat mode
-        if (repeatMode === 'one') {
-          // Repeat current segment
-          seekTo(0);
-          play();
-          return;
-        }
-
-        // Auto-advance to next segment
-        if (currentSegmentIndex < bookSegments.length - 1) {
-          const nextIndex = currentSegmentIndex + 1;
-          setCurrentSegmentIndex(nextIndex);
-        } else {
-          // Last segment finished
-          if (repeatMode === 'all') {
-            // Loop back to beginning
-            setCurrentSegmentIndex(0);
-          } else {
-            // All segments finished, stop playback
-            useAudioStore.setState({ isPlaying: false });
-          }
-        }
-      },
-    },
+    audioCallbacks,
   );
+
+  // Update refs after hook returns values
+  currentSegmentRef.current = currentSegment;
+  currentSegmentIndexRef.current = currentSegmentIndex;
+  bookSegmentsRef.current = bookSegments;
+  repeatModeRef.current = repeatMode;
+  seekToRef.current = seekTo;
+  playRef.current = play;
+  pauseRef.current = pause;
 
   // Sync store state with real player state
   useEffect(() => {
@@ -164,21 +198,42 @@ export default function AudioPlayerScreen() {
   }, [currentTime, currentSegment]);
 
   // Auto-save listening progress every 5 seconds
-  useEffect(() => {
-    if (!isPlaying || !book) return;
+  const isPlayingRef = useRef(isPlaying);
+  const bookRef = useRef(book);
+  const currentTimeRef = useRef(currentTime);
+  const currentSegmentForSaveRef = useRef(currentSegment);
+  const totalDurationRef = useRef(totalDuration);
+  const bookIdRef = useRef(bookId);
+  const updateListeningProgressRef = useRef(updateListeningProgress);
 
+  isPlayingRef.current = isPlaying;
+  bookRef.current = book;
+  currentTimeRef.current = currentTime;
+  currentSegmentForSaveRef.current = currentSegment;
+  totalDurationRef.current = totalDuration;
+  bookIdRef.current = bookId;
+  updateListeningProgressRef.current = updateListeningProgress;
+
+  useEffect(() => {
     const timer = setInterval(() => {
-      const globalTime = currentSegment ? currentSegment.start_time + currentTime : currentTime;
-      const progressPercent = totalDuration > 0 ? (globalTime / totalDuration) * 100 : 0;
-      updateListeningProgress({
-        book_id: bookId,
+      const playing = isPlayingRef.current;
+      const bk = bookRef.current;
+      if (!playing || !bk) return;
+
+      const seg = currentSegmentForSaveRef.current;
+      const time = currentTimeRef.current;
+      const globalTime = seg ? seg.start_time + time : time;
+      const dur = totalDurationRef.current;
+      const progressPercent = dur > 0 ? (globalTime / dur) * 100 : 0;
+      updateListeningProgressRef.current({
+        book_id: bookIdRef.current,
         current_time: globalTime,
         progress_percent: Math.min(progressPercent, 100),
       });
     }, 5000);
 
     return () => clearInterval(timer);
-  }, [isPlaying, book, bookId, currentTime, currentSegment, totalDuration, updateListeningProgress]);
+  }, []);
 
   useEffect(() => {
     fetchBook();
@@ -228,40 +283,45 @@ export default function AudioPlayerScreen() {
   };
 
   const handlePlayPause = useCallback(() => {
-    if (bookSegments.length === 0) return;
+    if (bookSegmentsRef.current.length === 0) return;
     if (isPlaying) {
       pause();
     } else {
       play();
     }
-  }, [isPlaying, play, pause, bookSegments.length]);
+  }, [isPlaying, play, pause]);
 
-  const handleSeek = (value: number) => {
+  const handleSeek = useCallback((value: number) => {
     // Map global time to segment-local time
-    if (bookSegments.length === 0) return;
+    const segs = bookSegmentsRef.current;
+    if (segs.length === 0) return;
 
     // Find which segment this time falls in
     let accumulatedTime = 0;
-    for (const seg of bookSegments) {
+    for (const seg of segs) {
       const segDuration = seg.end_time - seg.start_time;
       if (value >= accumulatedTime && value < accumulatedTime + segDuration) {
-        const segIndex = bookSegments.indexOf(seg);
+        const segIndex = segs.indexOf(seg);
         const localTime = value - accumulatedTime;
         setCurrentSegmentIndex(segIndex);
-        seekTo(localTime);
+        seekToRef.current(localTime);
         return;
       }
       accumulatedTime += segDuration;
     }
     // If beyond all segments, seek to end of last segment
-    const lastSeg = bookSegments[bookSegments.length - 1];
-    setCurrentSegmentIndex(bookSegments.length - 1);
-    seekTo(Math.min(currentTime, duration));
-  };
+    setCurrentSegmentIndex(segs.length - 1);
+    seekToRef.current(0);
+  }, []);
 
-  const handleSpeedChange = () => {
+  // Use a ref for playback speed to avoid recreating this callback on every speed change
+  const audioSettingsRef = useRef(audioSettings);
+  audioSettingsRef.current = audioSettings;
+
+  const handleSpeedChange = useCallback(() => {
     const speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
-    const currentIndex = speeds.indexOf(audioSettings.playbackSpeed);
+    const currentSpeed = audioSettingsRef.current.playbackSpeed;
+    const currentIndex = speeds.indexOf(currentSpeed);
     const nextSpeed = speeds[(currentIndex + 1) % speeds.length];
     setPlaybackRate(nextSpeed);
     setPlaybackSpeed(nextSpeed);
@@ -269,72 +329,74 @@ export default function AudioPlayerScreen() {
       ...s,
       audioSettings: { ...s.audioSettings, playbackSpeed: nextSpeed },
     }));
-  };
+  }, [setPlaybackRate, setPlaybackSpeed]);
 
-  const handleSkipForward = () => {
-    const newTime = Math.min(currentTime + 10, totalDuration);
+  const handleSkipForward = useCallback(() => {
+    const segs = bookSegmentsRef.current;
+    if (segs.length === 0) return;
+    const seg = currentSegmentRef.current;
+    const localTime = currentTimeRef.current;
+    const globalTime = seg ? seg.start_time + localTime : localTime;
+    const newTime = Math.min(globalTime + 10, totalDurationRef.current);
     handleSeek(newTime);
-  };
+  }, [handleSeek]);
 
-  const handleSkipBackward = () => {
-    const newTime = Math.max(currentTime - 10, 0);
+  const handleSkipBackward = useCallback(() => {
+    const seg = currentSegmentRef.current;
+    const localTime = currentTimeRef.current;
+    const globalTime = seg ? seg.start_time + localTime : localTime;
+    const newTime = Math.max(globalTime - 10, 0);
     handleSeek(newTime);
-  };
+  }, [handleSeek]);
 
   // Shuffle toggle
-  const handleShuffle = () => {
-    setIsShuffled(!isShuffled);
-  };
+  const handleShuffle = useCallback(() => {
+    setIsShuffled(prev => !prev);
+  }, []);
 
   // Cycle repeat mode: none -> all -> one -> none
-  const handleRepeat = () => {
+  const handleRepeat = useCallback(() => {
     setRepeatMode(prev => {
       if (prev === 'none') return 'all';
       if (prev === 'all') return 'one';
       return 'none';
     });
-  };
-
-  // Get the display index for the current segment (for shuffled mode)
-  const getDisplayIndex = (index: number) => {
-    if (!isShuffled || bookSegments.length === 0) return index;
-    // Generate shuffled order (same algorithm as queue.ts)
-    const order = Array.from({ length: bookSegments.length }, (_, i) => i);
-    for (let i = order.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [order[i], order[j]] = [order[j], order[i]];
-    }
-    return order[index];
-  };
+  }, []);
 
   // Lock-screen media controls and headphone integration
-  useMediaControls({
-    title: book?.title || 'Unknown',
-    artist: book?.author || 'Unknown',
-    album: 'EODH Audiobooks',
-    isPlaying,
-    onPlay: () => {
-      if (bookSegments.length > 0) play();
-    },
-    onPause: pause,
-    onNext: handleSkipForward,
-    onPrevious: handleSkipBackward,
-    onSeek: (position) => handleSeek(position),
-    onStop: () => {
-      pause();
-      seekTo(0);
-    },
-  });
-
-  const formatTime = (seconds: number): string => {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
+  // Memoize the options object to avoid unnecessary re-renders in the hook
+  const mediaControlsOptions = useMemo(
+    () => ({
+      title: book?.title || 'Unknown',
+      artist: book?.author || 'Unknown',
+      album: 'EODH Audiobooks',
+      isPlaying,
+      onPlay: () => {
+        if (bookSegmentsRef.current.length > 0) playRef.current();
+      },
+      onPause: () => pauseRef.current(),
+      onNext: handleSkipForward,
+      onPrevious: handleSkipBackward,
+      onSeek: (position: number) => handleSeek(position),
+      onStop: () => {
+        pauseRef.current();
+        seekToRef.current(0);
+      },
+    }),
+    [book?.title, book?.author, isPlaying, handleSkipForward, handleSkipBackward, handleSeek],
+  );
+  useMediaControls(mediaControlsOptions);
 
   // Calculate global time for display
   const globalTime = currentSegment ? currentSegment.start_time + currentTime : currentTime;
   const displayDuration = totalDuration || duration;
+
+  // Memoized formatTime to avoid recreating on every render
+  const formatTime = useCallback((seconds: number): string => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  }, []);
 
   if (loading) {
     return (
@@ -415,7 +477,7 @@ export default function AudioPlayerScreen() {
             minimumTrackTintColor={colors.primary}
             maximumTrackTintColor={colors.border}
             thumbTintColor={colors.primary}
-            onValueChange={handleSeek}
+            onSlidingComplete={handleSeek}
           />
           <View style={styles.timeRow}>
             <Text style={styles.timeText}>{formatTime(globalTime)}</Text>
@@ -499,7 +561,7 @@ export default function AudioPlayerScreen() {
                 onPress={() => {
                   setCurrentSegmentIndex(index);
                   // Seek to start of this segment
-                  seekTo(0);
+                  seekToRef.current(0);
                 }}
               >
                 <View style={styles.chapterNumber}>

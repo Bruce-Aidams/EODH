@@ -1,7 +1,6 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useTheme } from '@/lib/theme/ThemeContext';
-import { FONT_SIZE, COLORS } from '@/constants/theme';
 
 interface SectionHeaderProps {
   title: string;
@@ -21,7 +20,7 @@ export function SectionHeader({ title, onPressSeeAll, showSeeAll = true, subtitl
       </View>
       {showSeeAll && onPressSeeAll && (
         <TouchableOpacity onPress={onPressSeeAll} activeOpacity={0.6}>
-          <Text style={[styles.seeAll, { color: COLORS.royalPurple }]}>See All</Text>
+          <Text style={[styles.seeAll, { color: colors.primary }]}>See all</Text>
         </TouchableOpacity>
       )}
     </View>
@@ -33,22 +32,24 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginHorizontal: 20,
-    marginVertical: 12,
+    marginHorizontal: 16,
+    marginTop: 16,
+    marginBottom: 8,
   },
   left: {
     flex: 1,
   },
   title: {
-    fontSize: FONT_SIZE.xl,
-    fontWeight: '700',
+    fontSize: 16,
+    fontWeight: '600',
+    letterSpacing: 0.1,
   },
   subtitle: {
-    fontSize: FONT_SIZE.sm,
+    fontSize: 13,
     marginTop: 2,
   },
   seeAll: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
+    fontSize: 13,
+    fontWeight: '500',
   },
 });

@@ -25,7 +25,8 @@ import { useAnimatedFade } from '@/hooks/useAnimatedFade';
 
 export default function SignUpScreen() {
   const router = useRouter();
-  const { signUp, isLoading } = useAuthStore();
+  const signUp = useAuthStore((s) => s.signUp);
+  const isLoading = useAuthStore((s) => s.isLoading);
   const { showSuccess, showError } = useToast();
   const { isDark, colors } = useTheme();
   const [name, setName] = useState('');

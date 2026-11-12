@@ -6,7 +6,6 @@ import {
   FlatList,
   TouchableOpacity,
   StatusBar,
-  ActivityIndicator,
   ScrollView,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -23,11 +22,20 @@ import SearchBar from '@/components/SearchBar';
 import { useTheme } from '@/lib/theme/ThemeContext';
 import { AnimatedView } from '@/components/AnimatedView';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { SkeletonList } from '@/components/Skeleton';
+import { useHaptics } from '@/lib/haptics';
 
 export default function LibraryScreen() {
   const router = useRouter();
-  const { books, isLoading, searchQuery, sortBy, fetchBooks, setSearchQuery, setSortBy } = useLibraryStore();
+  const books = useLibraryStore((s) => s.books);
+  const isLoading = useLibraryStore((s) => s.isLoading);
+  const searchQuery = useLibraryStore((s) => s.searchQuery);
+  const sortBy = useLibraryStore((s) => s.sortBy);
+  const fetchBooks = useLibraryStore((s) => s.fetchBooks);
+  const setSearchQuery = useLibraryStore((s) => s.setSearchQuery);
+  const setSortBy = useLibraryStore((s) => s.setSortBy);
   const { colors, isDark } = useTheme();
+  const { haptic } = useHaptics();
   const dimensions = useResponsiveDimensions();
   const insets = useSafeAreaInsets();
   const [localSearch, setLocalSearch] = useState('');
@@ -89,7 +97,7 @@ export default function LibraryScreen() {
 
   const hasFilters = localSearch || selectedCategory || selectedType !== 'all';
 
-  const renderBook = ({ item, index }: { item: Book; index: number }) => {
+  const renderBook = useCallback(({ item, index }: { item: Book; index: number }) => {
     return (
       <AnimatedView
         fadeDelay={300 + index * 60}
@@ -132,7 +140,7 @@ export default function LibraryScreen() {
         <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
       </AnimatedView>
     );
-  };
+  }, [router, colors.card, dimensions.listCoverWidth, dimensions.listCoverHeight]);
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['left', 'right']}>
@@ -240,7 +248,7 @@ export default function LibraryScreen() {
 
       {isLoading ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={COLORS.royalPurple} />
+          <SkeletonList count={8} itemHeight={80} />
         </View>
       ) : filteredBooks.length > 0 ? (
         <FlatList
@@ -248,6 +256,10 @@ export default function LibraryScreen() {
           renderItem={renderBook}
           keyExtractor={(item) => item.id}
           contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + SPACING.xxl + 20 }]}
+          initialNumToRender={10}
+          maxToRenderPerBatch={5}
+          windowSize={5}
+          removeClippedSubviews={true}
         />
       ) : (
         <View style={styles.emptyState}>

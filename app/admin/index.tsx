@@ -19,7 +19,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function AdminDashboard() {
   const router = useRouter();
-  const { isAdmin } = useAuthStore();
+  const isAdmin = useAuthStore((s) => s.isAdmin);
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
 

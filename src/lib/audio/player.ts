@@ -40,66 +40,81 @@ export function useCompleteAudioPlayer(
   callbacks: AudioPlayerCallbacks = {}
 ) {
   // Hooks MUST be called unconditionally (Rules of Hooks).
-  // Pass null when no URI is available — the player handles null gracefully.
-  const player = useAudioPlayer(uri ? { uri } : null);
+  // expo-audio has a known Android crash when passing null directly,
+  // so we pass undefined instead.
+  const player = useAudioPlayer(uri ? { uri } : undefined);
   const status = useAudioPlayerStatus(player);
 
-  // Initialize playback rate
+  // Use a ref for callbacks to avoid re-running effects when callbacks change
+  const callbacksRef = useRef(callbacks);
+  callbacksRef.current = callbacks;
+
+  // Initialize playback rate when the player is created with a URI
+  // Also update when the initialRate changes (e.g., user changes speed)
+  const initialRateRef = useRef(initialRate);
+  initialRateRef.current = initialRate;
   useEffect(() => {
     if (player && uri) {
-      player.playbackRate = initialRate;
+      player.setPlaybackRate(initialRateRef.current);
     }
-  }, [player, uri, initialRate]);
+  }, [player, uri]);
+
+  // Update playback rate when initialRate changes while playing
+  useEffect(() => {
+    if (player) {
+      player.setPlaybackRate(initialRate);
+    }
+  }, [player, initialRate]);
 
   // Track position changes via status
   const lastTimeRef = useRef<number>(0);
   useEffect(() => {
     if (status?.currentTime != null && status.currentTime !== lastTimeRef.current) {
       lastTimeRef.current = status.currentTime;
-      callbacks.onPositionChange?.(status.currentTime);
+      callbacksRef.current.onPositionChange?.(status.currentTime);
     }
-  }, [status?.currentTime, callbacks]);
+  }, [status?.currentTime]);
 
   // Track duration changes
   useEffect(() => {
     if (status?.duration != null && status.duration > 0) {
-      callbacks.onDurationChange?.(status.duration);
+      callbacksRef.current.onDurationChange?.(status.duration);
     }
-  }, [status?.duration, callbacks]);
+  }, [status?.duration]);
 
   // Track buffering
   useEffect(() => {
     if (status?.isBuffering != null) {
-      callbacks.onBufferingChange?.(status.isBuffering);
+      callbacksRef.current.onBufferingChange?.(status.isBuffering);
     }
-  }, [status?.isBuffering, callbacks]);
+  }, [status?.isBuffering]);
 
   // Track playback end
   useEffect(() => {
     if (status?.didJustFinish) {
-      callbacks.onPlaybackEnd?.();
+      callbacksRef.current.onPlaybackEnd?.();
     }
-  }, [status?.didJustFinish, callbacks]);
+  }, [status?.didJustFinish]);
 
   // Track errors
   useEffect(() => {
     if (status?.error) {
-      callbacks.onError?.(status.error);
+      callbacksRef.current.onError?.(status.error);
     }
-  }, [status?.error, callbacks]);
+  }, [status?.error]);
 
   // Track playing state
   const lastPlayingRef = useRef<boolean>(false);
   useEffect(() => {
     if (status?.playing != null) {
       if (status.playing && !lastPlayingRef.current) {
-        callbacks.onPlay?.();
+        callbacksRef.current.onPlay?.();
       } else if (!status.playing && lastPlayingRef.current) {
-        callbacks.onPause?.();
+        callbacksRef.current.onPause?.();
       }
       lastPlayingRef.current = status.playing;
     }
-  }, [status?.playing, callbacks]);
+  }, [status?.playing]);
 
   const play = useCallback(() => {
     player?.play();
@@ -112,15 +127,15 @@ export function useCompleteAudioPlayer(
   const seekTo = useCallback(
     (time: number) => {
       player?.seekTo(time);
-      callbacks.onSeek?.(time);
+      callbacksRef.current.onSeek?.(time);
     },
-    [player, callbacks]
+    [player]
   );
 
   const setPlaybackRate = useCallback(
     (rate: number) => {
       if (player) {
-        player.playbackRate = rate;
+        player.setPlaybackRate(rate);
       }
     },
     [player]

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, memo, useMemo } from 'react';
 import {
   View,
   Text,
@@ -22,7 +22,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function AudioScreen() {
   const router = useRouter();
-  const { recentlyListened, books, fetchRecentlyListened, fetchBooks } = useLibraryStore();
+  const recentlyListened = useLibraryStore((s) => s.recentlyListened);
+  const books = useLibraryStore((s) => s.books);
+  const fetchRecentlyListened = useLibraryStore((s) => s.fetchRecentlyListened);
+  const fetchBooks = useLibraryStore((s) => s.fetchBooks);
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -39,7 +42,7 @@ export default function AudioScreen() {
     setIsRefreshing(false);
   }, [fetchRecentlyListened, fetchBooks]);
 
-  const audioBooks = books.filter(b => b.has_audio);
+  const audioBooks = useMemo(() => books.filter(b => b.has_audio), [books]);
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['left', 'right']}>
@@ -104,7 +107,7 @@ export default function AudioScreen() {
   );
 }
 
-function ListeningBookCard({ book, progress }: { book: any; progress: any }) {
+const ListeningBookCard = memo(function ListeningBookCard({ book, progress }: { book: any; progress: any }) {
   const router = useRouter();
   const { colors } = useTheme();
   const dimensions = useResponsiveDimensions();
@@ -141,9 +144,9 @@ function ListeningBookCard({ book, progress }: { book: any; progress: any }) {
       </View>
     </TouchableOpacity>
   );
-}
+});
 
-function AudioBookListItem({ book }: { book: any }) {
+const AudioBookListItem = memo(function AudioBookListItem({ book }: { book: any }) {
   const router = useRouter();
   const { colors } = useTheme();
   const dimensions = useResponsiveDimensions();
@@ -180,7 +183,7 @@ function AudioBookListItem({ book }: { book: any }) {
       </TouchableOpacity>
     </TouchableOpacity>
   );
-}
+});
 
 const styles = StyleSheet.create({
   container: {

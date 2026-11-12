@@ -296,6 +296,47 @@ export default function AdminUploadScreen() {
         setProcessingStage(progress.message);
       });
 
+      // If EPUB processing extracted a cover image and no cover was manually uploaded, upload it
+      if (result.coverImageBase64 && !coverImage) {
+        try {
+          setProcessingStage('Uploading extracted cover image...');
+          const coverExtension = result.coverMimeType === 'image/png' ? 'png' : 'jpg';
+          const coverFilePath = `${Date.now()}-cover.${coverExtension}`;
+
+          // Convert base64 to Uint8Array for upload
+          const binaryString = atob(result.coverImageBase64);
+          const bytes = new Uint8Array(binaryString.length);
+          for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+          }
+
+          const { data: uploadData, error: uploadError } = await supabase.storage
+            .from('covers')
+            .upload(coverFilePath, bytes, {
+              contentType: result.coverMimeType || 'image/jpeg',
+              upsert: true,
+            });
+
+          if (!uploadError && uploadData) {
+            const { data: urlData } = supabase.storage
+              .from('covers')
+              .getPublicUrl(uploadData.path);
+
+            if (urlData.publicUrl) {
+              // Update the book with the extracted cover URL
+              await supabase
+                .from('books')
+                .update({ cover_url: urlData.publicUrl })
+                .eq('id', book.id);
+
+              console.log('EPUB cover image uploaded and attached to book');
+            }
+          }
+        } catch (coverErr) {
+          console.error('Failed to upload extracted cover:', coverErr);
+        }
+      }
+
       if (result.success) {
         showSuccess(`Document processed: ${result.chaptersCreated} chapters, ${result.segmentsCreated} segments created.`);
       } else if (result.needsOcr) {
