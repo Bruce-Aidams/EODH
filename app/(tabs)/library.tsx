@@ -108,12 +108,8 @@ export default function LibraryScreen() {
   const renderBook = useCallback(({ item, index }: { item: Book; index: number }) => {
     return (
       <AnimatedView
-        fadeDelay={300 + index * 60}
-        fadeDuration={350}
-        slideDirection="up"
-        slideDistance={20}
+        disableAnimation
         onPress={() => router.push(`/book/${item.id}`)}
-        pressScale={0.97}
         style={[styles.bookItem, { backgroundColor: colors.card }]}
       >
         <View style={[styles.bookCover, { width: dimensions.listCoverWidth, height: dimensions.listCoverHeight }]}>

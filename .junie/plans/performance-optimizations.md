@@ -107,3 +107,13 @@ Replace hardcoded 2.5s timeout with adaptive navigation that respects auth state
 - Keep the animation sequence (fade, scale, loading dots) intact
 - Add unit tests in `__tests__/splash.adaptive.test.ts` verifying adaptive timing behavior
 - Run TypeScript compilation check to verify no errors
+
+### * Step 3: Disable per-item animations in lists
+Add `disableAnimation` prop to AnimatedView and apply it to list items in library.tsx and index.tsx to eliminate hundreds of simultaneous animations.
+- Add `disableAnimation` prop to `AnimatedView` component in `src/components/AnimatedView.tsx`
+- When `disableAnimation` is true, skip all shared values, animations, and return a simple View
+- Update `renderBook` in `library.tsx` to use `disableAnimation` for list items
+- Update book grid items in `index.tsx` to use `disableAnimation` for list items
+- Keep animations for section-level elements (headers, filters, sort bars)
+- Add unit tests in `__tests__/AnimatedView.disable.test.ts`
+- Run TypeScript compilation check to verify no errors

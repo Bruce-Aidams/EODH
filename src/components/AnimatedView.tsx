@@ -1,5 +1,5 @@
 import React, { useEffect, ReactNode } from 'react';
-import { ViewStyle, TouchableOpacity } from 'react-native';
+import { View, ViewStyle, TouchableOpacity } from 'react-native';
 import Animated, {
   useAnimatedStyle,
   withTiming,
@@ -18,11 +18,13 @@ interface AnimatedViewProps {
   slideDelay?: number;
   onPress?: () => void;
   pressScale?: number;
+  disableAnimation?: boolean;
 }
 
 /**
  * Animated wrapper view that combines fade-in and slide-in animations.
  * Optionally supports press scale animation for interactive elements.
+ * When `disableAnimation` is true, renders a simple View without any animation overhead.
  */
 export function AnimatedView({
   children,
@@ -34,7 +36,24 @@ export function AnimatedView({
   slideDelay = 0,
   onPress,
   pressScale = 0.96,
+  disableAnimation = false,
 }: AnimatedViewProps) {
+  // Fast path: skip all animation overhead for list items
+  if (disableAnimation) {
+    if (onPress) {
+      return (
+        <TouchableOpacity
+          onPress={onPress}
+          activeOpacity={0.7}
+          style={style}
+        >
+          {children}
+        </TouchableOpacity>
+      );
+    }
+    return <View style={style}>{children}</View>;
+  }
+
   const opacity = useSharedValue(0);
   const scale = useSharedValue(1);
 

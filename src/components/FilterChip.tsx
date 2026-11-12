@@ -1,8 +1,10 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import Animated from 'react-native-reanimated';
 import { BORDER_RADIUS, SPACING } from '@/constants/theme';
 import { useTheme } from '@/lib/theme/ThemeContext';
 import { Ionicons } from '@expo/vector-icons';
+import { triggerHaptic } from '@/lib/haptics';
 
 interface FilterChipProps {
   label: string;
@@ -21,6 +23,11 @@ export default function FilterChip({
 }: FilterChipProps) {
   const { colors } = useTheme();
 
+  const handlePress = async () => {
+    await triggerHaptic('selection');
+    onPress?.();
+  };
+
   return (
     <TouchableOpacity
       style={[
@@ -29,26 +36,28 @@ export default function FilterChip({
           backgroundColor: selected ? colors.primary : colors.surfaceVariant,
         },
       ]}
-      onPress={onPress}
-      activeOpacity={0.7}
+      onPress={handlePress}
+      activeOpacity={0.85}
     >
-      {icon && (
-        <Ionicons
-          name={icon}
-          size={14}
-          color={selected ? '#FFFFFF' : colors.textSecondary}
-        />
-      )}
-      <Text style={[styles.label, { color: selected ? '#FFFFFF' : colors.textSecondary }]}>
-        {label}
-      </Text>
-      {count !== undefined && (
-        <View style={[styles.countBadge, { backgroundColor: selected ? 'rgba(255,255,255,0.4)' : colors.border }]}>
-          <Text style={[styles.countText, { color: selected ? '#FFFFFF' : colors.textSecondary }]}>
-            {count}
-          </Text>
-        </View>
-      )}
+      <Animated.View style={[styles.chipInner, { transform: [{ scale: selected ? 1.05 : 1 }] }]}>
+        {icon && (
+          <Ionicons
+            name={icon}
+            size={14}
+            color={selected ? '#FFFFFF' : colors.textSecondary}
+          />
+        )}
+        <Text style={[styles.label, { color: selected ? '#FFFFFF' : colors.textSecondary }]}>
+          {label}
+        </Text>
+        {count !== undefined && (
+          <View style={[styles.countBadge, { backgroundColor: selected ? 'rgba(255,255,255,0.4)' : colors.border }]}>
+            <Text style={[styles.countText, { color: selected ? '#FFFFFF' : colors.textSecondary }]}>
+              {count}
+            </Text>
+          </View>
+        )}
+      </Animated.View>
     </TouchableOpacity>
   );
 }
@@ -60,6 +69,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.sm,
     paddingVertical: 6,
     borderRadius: 20,
+    gap: 4,
+  },
+  chipInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 4,
   },
   label: {

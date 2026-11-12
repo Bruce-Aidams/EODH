@@ -7,7 +7,6 @@ import {
   TouchableOpacity,
   Image,
   StatusBar,
-  ActivityIndicator,
   Alert,
   Dimensions,
 } from 'react-native';
@@ -24,6 +23,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '@/lib/theme/ThemeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { SkeletonCard, SkeletonText, SkeletonList } from '@/components/Skeleton';
 
 export default function BookDetailScreen() {
   const { id } = useLocalSearchParams();
@@ -188,7 +188,30 @@ export default function BookDetailScreen() {
   if (loading) {
     return (
       <SafeAreaView style={[styles.loadingContainer, { backgroundColor: colors.background }]} edges={['left', 'right']}>
-        <ActivityIndicator size="large" color={colors.primary} />
+        <ScrollView contentContainerStyle={{ padding: SPACING.lg, paddingBottom: insets.bottom + SPACING.xxl }}>
+          {/* Header skeleton */}
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: SPACING.lg, paddingTop: insets.top }}>
+            <SkeletonText width={40} height={24} />
+            <SkeletonText width={40} height={24} />
+          </View>
+          {/* Cover skeleton */}
+          <SkeletonCard width="100%" height={260} borderRadius={BORDER_RADIUS.lg} marginBottom={SPACING.lg} />
+          {/* Title & author skeleton */}
+          <SkeletonText width="80%" height={28} marginBottom={SPACING.sm} />
+          <SkeletonText width="50%" height={18} marginBottom={SPACING.lg} />
+          {/* Meta badges skeleton */}
+          <View style={{ flexDirection: 'row', gap: 8, marginBottom: SPACING.lg }}>
+            <SkeletonText width={60} height={24} borderRadius={20} />
+            <SkeletonText width={60} height={24} borderRadius={20} />
+            <SkeletonText width={60} height={24} borderRadius={20} />
+          </View>
+          {/* Description skeleton */}
+          <SkeletonList count={4} marginBottom={SPACING.lg} />
+          {/* Action buttons skeleton */}
+          <SkeletonCard width="100%" height={72} borderRadius={BORDER_RADIUS.md} marginBottom={SPACING.md} />
+          <SkeletonCard width="100%" height={72} borderRadius={BORDER_RADIUS.md} marginBottom={SPACING.md} />
+          <SkeletonCard width="100%" height={72} borderRadius={BORDER_RADIUS.md} />
+        </ScrollView>
       </SafeAreaView>
     );
   }
