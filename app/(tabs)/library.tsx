@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   StatusBar,
   ScrollView,
+  RefreshControl,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -42,6 +43,13 @@ export default function LibraryScreen() {
   const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [selectedType, setSelectedType] = useState<'all' | 'pdf' | 'markdown' | 'audio'>('all');
   const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await fetchBooks();
+    setRefreshing(false);
+  }, [fetchBooks]);
 
 
   // Load categories once on mount
@@ -49,7 +57,7 @@ export default function LibraryScreen() {
     loadCategories();
   }, []);
 
-  // Refetch books whenever the screen gains focus (e.g., after uploading a book)
+  // Background refresh on focus — fetchBooks skips if cache is fresh (< 60s TTL)
   useFocusEffect(
     useCallback(() => {
       fetchBooks();
@@ -260,6 +268,14 @@ export default function LibraryScreen() {
           maxToRenderPerBatch={5}
           windowSize={5}
           removeClippedSubviews={true}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor={colors.primary}
+              colors={[colors.primary]}
+            />
+          }
         />
       ) : (
         <View style={styles.emptyState}>

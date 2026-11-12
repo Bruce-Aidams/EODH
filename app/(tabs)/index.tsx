@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   StatusBar,
   ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -47,6 +48,18 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const [ready, setReady] = useState(false);
   const [dataLoaded, setDataLoaded] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await Promise.all([
+      fetchBooks(),
+      fetchFeaturedBooks(),
+      fetchRecentlyOpened(),
+      fetchRecentlyListened()
+    ]);
+    setRefreshing(false);
+  }, [fetchBooks, fetchFeaturedBooks, fetchRecentlyOpened, fetchRecentlyListened]);
 
   // Set ready state when auth loads
   useEffect(() => {
@@ -55,11 +68,17 @@ export default function HomeScreen() {
     }
   }, [isLoading]);
 
-  // Refetch data whenever the screen gains focus (e.g., after uploading a book)
+  // Background refresh: use cached data from persist middleware on focus,
+  // and only fetch fresh data in the background (TTL-based skip in store)
   useFocusEffect(
     useCallback(() => {
       if (!isLoading) {
-        setDataLoaded(false);
+        // If cached data is available, show it immediately
+        const hasCachedBooks = useLibraryStore.getState().books.length > 0;
+        if (hasCachedBooks) {
+          setDataLoaded(true);
+        }
+        // Background refresh — fetchBooks will skip if cache is fresh (< 60s)
         Promise.all([
           fetchBooks(),
           fetchFeaturedBooks(),
@@ -144,7 +163,19 @@ export default function HomeScreen() {
         </View>
       </TouchableOpacity>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + SPACING.xxl + 20 }]} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + SPACING.xxl + 20 }]}
+        keyboardShouldPersistTaps="handled"
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
+      >
         {/* Skeleton Loading */}
         {!dataLoaded && (
           <View style={styles.skeletonSection}>
@@ -271,7 +302,11 @@ const BookCard = React.memo(function BookCard({ book, compact }: { book: any; co
       onPress={() => router.push(`/book/${book.id}`)}
       activeOpacity={0.7}
     >
-      <View style={[styles.bookCover, { width, height: coverHeight, backgroundColor: colors.surfaceVariant }]}>
+      <View style={[
+        styles.bookCover,
+        { width, height: coverHeight, backgroundColor: colors.surfaceVariant },
+        SHADOWS.md,
+      ]}>
         <LazyImage
           uri={book.cover_url || undefined}
           width={width}
@@ -306,7 +341,11 @@ const ListeningBookCard = React.memo(function ListeningBookCard({ book, progress
       accessibilityLabel={`Continue listening to ${book.title}`}
       accessibilityRole="button"
     >
-      <View style={[styles.bookCover, { width, height: coverHeight, backgroundColor: colors.surfaceVariant }]}>
+      <View style={[
+        styles.bookCover,
+        { width, height: coverHeight, backgroundColor: colors.surfaceVariant },
+        SHADOWS.md,
+      ]}>
         <LazyImage
           uri={book.cover_url || undefined}
           width={width}

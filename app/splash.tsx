@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef, useCallback } from 'react';
 import { View, Text, StyleSheet, Dimensions } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -14,11 +14,22 @@ import Animated, {
   runOnJS,
 } from 'react-native-reanimated';
 import { GRADIENTS, COLORS, FONT_SIZE, toGradientCSS } from '@/constants/theme';
+import { useAuthStore } from '@/stores/authStore';
 
 const { width, height } = Dimensions.get('window');
+const MIN_DISPLAY_TIME = 800; // Minimum splash display time for branding
 
 export default function SplashScreen() {
   const router = useRouter();
+  const isLoading = useAuthStore((state) => state.isLoading);
+  const mountedTimeRef = useRef(Date.now());
+  const navigatedRef = useRef(false);
+
+  const navigate = useCallback(() => {
+    if (navigatedRef.current) return;
+    navigatedRef.current = true;
+    router.replace('/(tabs)');
+  }, [router]);
 
   // Fade and scale animations
   const fadeOpacity = useSharedValue(0);
@@ -81,14 +92,21 @@ export default function SplashScreen() {
     );
   }, []);
 
-  // Navigate directly to home after animation
+  // Navigate as soon as auth resolves, with a minimum display time for branding
   useEffect(() => {
-    const navigateTimer = setTimeout(() => {
-      router.replace('/(tabs)');
-    }, 2500);
+    // If auth is still loading, wait for it to resolve
+    if (isLoading) return;
 
-    return () => clearTimeout(navigateTimer);
-  }, []);
+    const elapsed = Date.now() - mountedTimeRef.current;
+    const remaining = Math.max(0, MIN_DISPLAY_TIME - elapsed);
+
+    if (remaining > 0) {
+      const timer = setTimeout(navigate, remaining);
+      return () => clearTimeout(timer);
+    } else {
+      navigate();
+    }
+  }, [isLoading, navigate]);
 
   return (
     <View style={[styles.container, { backgroundImage: toGradientCSS(GRADIENTS.primary) }]}>

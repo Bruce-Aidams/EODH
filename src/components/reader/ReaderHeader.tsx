@@ -5,6 +5,7 @@ import {
   TouchableOpacity,
   StyleSheet,
 } from 'react-native';
+import { BlurView } from 'expo-blur';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { AnimatedView } from '@/components/AnimatedView';
@@ -85,14 +86,18 @@ export const ReaderHeader: React.FC<ReaderHeaderProps> = ({
     // Parent will handle scroll-based auto-hide
   }, []);
 
+  // Determine if dark theme for blur tint color
+  const isDark = themeColors.background === '#030712' || themeColors.background === '#111827';
+
   return (
     showHeader && (
       <AnimatedView fadeDelay={50} fadeDuration={300} slideDirection="down" slideDistance={20}>
-        <View
+        <BlurView
+          intensity={isDark ? 60 : 80}
+          tint={isDark ? 'dark' : 'light'}
           style={[
             styles.header,
             {
-              backgroundColor: themeColors.background,
               borderBottomColor: colors.border,
               paddingTop: insets.top + 8,
             },
@@ -131,7 +136,7 @@ export const ReaderHeader: React.FC<ReaderHeaderProps> = ({
               <Ionicons name="ellipsis-vertical" size={22} color={themeColors.text} />
             </TouchableOpacity>
           </View>
-        </View>
+        </BlurView>
       </AnimatedView>
     )
   );

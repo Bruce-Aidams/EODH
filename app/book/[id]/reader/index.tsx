@@ -14,7 +14,7 @@ import {
   Share,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import Animated from 'react-native-reanimated';
+import Animated, { useSharedValue, withSequence, withTiming } from 'react-native-reanimated';
 import * as FileSystem from 'expo-file-system/legacy';
 import { getInfoAsync, readAsStringAsync } from 'expo-file-system/legacy';
 import { supabase } from '@/lib/supabase/client';
@@ -23,8 +23,9 @@ import { useAuthStore } from '@/stores/authStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useToast } from '@/lib/notifications/toast';
 import { Book, BookChapter, Highlight } from '@/types';
-import { BORDER_RADIUS } from '@/constants/theme';
+import { BORDER_RADIUS, GRADIENTS } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import RenderHtml from 'react-native-render-html';
 import { markdownToHtml, markdownHtmlStyles, markdownHtmlStylesDark, extractChapters } from '@/lib/markdown/renderer';
 import PdfReader from '@/components/PdfReader';
@@ -96,6 +97,9 @@ export default function ReaderScreen() {
   const [bookSegments, setBookSegments] = useState<AudioSegment[]>([]);
   const [resolvedAudioUris, setResolvedAudioUris] = useState<string[]>([]);
   const [currentSegmentIndex, setCurrentSegmentIndex] = useState(0);
+
+  // Chapter transition animation
+  const chapterFadeOpacity = useSharedValue(1);
 
   // Core state
   const [book, setBook] = useState<Book | null>(null);
@@ -644,6 +648,11 @@ export default function ReaderScreen() {
   const navigateToChapterIndex = async (index: number) => {
     if (chaptersWithContent[index]) {
       await haptic('medium');
+      // Fade out, then fade in on the new chapter
+      chapterFadeOpacity.value = withSequence(
+        withTiming(0, { duration: 150 }),
+        withTiming(1, { duration: 300 })
+      );
       setCurrentChapterIndex(index);
       setShowToc(false);
       setShowChapterPlaylist(false);
@@ -1355,55 +1364,75 @@ export default function ReaderScreen() {
         onToggleBookmark={handleBookmark}
       />
 
+      {/* Always-visible gradient progress mini-bar at top */}
+      {book?.document_type !== 'pdf' && (
+        <LinearGradient
+          colors={GRADIENTS.primary}
+          style={{
+            position: 'absolute',
+            top: insets.top,
+            left: 0,
+            right: 0,
+            height: 3,
+            zIndex: 10,
+            opacity: 0.9,
+          }}
+        >
+          <View style={{ width: `${progressPercent}%`, height: '100%', backgroundColor: 'rgba(255,255,255,0.3)' }} />
+        </LinearGradient>
+      )}
+
       {/* Progress Bar */}
       {book?.document_type !== 'pdf' && (
         <ProgressBar progress={progressPercent} height={3} />
       )}
 
-      {/* Content with tap zone navigation */}
+      {/* Content with tap zone navigation and chapter transition animation */}
       <AnimatedView style={{ flex: 1 }} fadeDelay={200} fadeDuration={400} slideDirection="up" slideDistance={15}>
-        <TapZones
-          onPrevious={handleTapPrevious}
-          onNext={handleTapNext}
-          onToggleUI={toggleHeader}
-          disabled={showSearch || showToc || showSettings || showActions || showOverflowMenu || showChapterPlaylist || showAISummary}
-        >
-          {book?.document_type === 'pdf' && viewMode === 'original' && (localDocumentUri || book.document_url) ? (
-            <View style={{ flex: 1 }}>
-              <PdfReader
-                sourceUri={localDocumentUri || book.document_url || ''}
-                onPageChange={(page, total) => {
-                  setCurrentPage(page);
-                  setTotalPages(total);
-                  if (book) {
-                    updateReadingProgress({
-                      book_id: bookIdRef.current,
-                      page_number: page,
-                      progress_percent: Math.min(100, (page / total) * 100),
-                    });
-                  }
-                }}
-                onLoadComplete={(total) => setTotalPages(total)}
-                onError={(err) => console.error('PDF error:', err)}
+        <Animated.View style={{ flex: 1, opacity: chapterFadeOpacity }}>
+          <TapZones
+            onPrevious={handleTapPrevious}
+            onNext={handleTapNext}
+            onToggleUI={toggleHeader}
+            disabled={showSearch || showToc || showSettings || showActions || showOverflowMenu || showChapterPlaylist || showAISummary}
+          >
+            {book?.document_type === 'pdf' && viewMode === 'original' && (localDocumentUri || book.document_url) ? (
+              <View style={{ flex: 1 }}>
+                <PdfReader
+                  sourceUri={localDocumentUri || book.document_url || ''}
+                  onPageChange={(page, total) => {
+                    setCurrentPage(page);
+                    setTotalPages(total);
+                    if (book) {
+                      updateReadingProgress({
+                        book_id: bookIdRef.current,
+                        page_number: page,
+                        progress_percent: Math.min(100, (page / total) * 100),
+                      });
+                    }
+                  }}
+                  onLoadComplete={(total) => setTotalPages(total)}
+                  onError={(err) => console.error('PDF error:', err)}
+                />
+              </View>
+            ) : (
+              <ChapterContent
+                htmlContent={htmlContent}
+                rawContent={rawContent}
+                themeColors={themeColors}
+                colors={{ primary: colors.primary }}
+                readingSettings={readingSettings}
+                contentWidth={contentWidth}
+                htmlStyles={htmlStyles}
+                loadingChapters={loadingChapters}
+                processingDocument={processingDocument}
+                processingMessage={processingMessage}
+                scrollViewRef={scrollViewRef as any}
+                onScroll={handleScroll}
               />
-            </View>
-          ) : (
-            <ChapterContent
-              htmlContent={htmlContent}
-              rawContent={rawContent}
-              themeColors={themeColors}
-              colors={{ primary: colors.primary }}
-              readingSettings={readingSettings}
-              contentWidth={contentWidth}
-              htmlStyles={htmlStyles}
-              loadingChapters={loadingChapters}
-              processingDocument={processingDocument}
-              processingMessage={processingMessage}
-              scrollViewRef={scrollViewRef as any}
-              onScroll={handleScroll}
-            />
-          )}
-        </TapZones>
+            )}
+          </TapZones>
+        </Animated.View>
       </AnimatedView>
 
       {/* View Mode Toggle for PDF Books */}

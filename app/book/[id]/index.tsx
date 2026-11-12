@@ -18,8 +18,9 @@ import { supabase } from '@/lib/supabase/client';
 import { useLibraryStore } from '@/stores/libraryStore';
 import { useToast } from '@/lib/notifications/toast';
 import { Book } from '@/types';
-import { SPACING, BORDER_RADIUS } from '@/constants/theme';
+import { SPACING, BORDER_RADIUS, GRADIENTS } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '@/lib/theme/ThemeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -304,9 +305,9 @@ export default function BookDetailScreen() {
             style={[styles.actionButton, { backgroundColor: colors.card, shadowColor: colors.cardShadow }]}
             onPress={() => router.push(`/book/${book.id}/reader`)}
           >
-            <View style={[styles.actionIconContainer, { backgroundColor: colors.primary }]}>
+            <LinearGradient colors={GRADIENTS.primary} style={styles.actionIconContainer}>
               <Ionicons name="book" size={24} color="#FFFFFF" />
-            </View>
+            </LinearGradient>
             <View style={styles.actionInfo}>
               <Text style={[styles.actionLabel, { color: colors.text }]}>Read</Text>
               <Text style={[styles.actionSubtext, { color: colors.textSecondary }]}>Open ebook reader</Text>
@@ -321,9 +322,9 @@ export default function BookDetailScreen() {
               style={[styles.actionButton, { backgroundColor: colors.card, shadowColor: colors.cardShadow }]}
               onPress={() => router.push(`/book/${book.id}/audio`)}
             >
-              <View style={[styles.actionIconContainer, { backgroundColor: colors.primary }]}>
+              <LinearGradient colors={GRADIENTS.accent} style={styles.actionIconContainer}>
                 <Ionicons name="play-circle" size={24} color="#FFFFFF" />
-              </View>
+              </LinearGradient>
               <View style={styles.actionInfo}>
                 <Text style={[styles.actionLabel, { color: colors.text }]}>Listen</Text>
                 <Text style={[styles.actionSubtext, { color: colors.textSecondary }]}>Play audiobook</Text>
@@ -335,9 +336,9 @@ export default function BookDetailScreen() {
             style={[styles.actionButton, { backgroundColor: colors.card, shadowColor: colors.cardShadow }]}
             onPress={() => router.push(`/book/${book.id}/sync`)}
           >
-            <View style={[styles.actionIconContainer, { backgroundColor: colors.primary }]}>
+            <LinearGradient colors={GRADIENTS.secondary} style={styles.actionIconContainer}>
               <Ionicons name="sync-circle" size={24} color="#FFFFFF" />
-            </View>
+            </LinearGradient>
             <View style={styles.actionInfo}>
               <Text style={[styles.actionLabel, { color: colors.text }]}>Read Along</Text>
               <Text style={[styles.actionSubtext, { color: colors.textSecondary }]}>
@@ -353,9 +354,9 @@ export default function BookDetailScreen() {
               onPress={handleDownload}
               disabled={isDownloading}
             >
-              <View style={[styles.actionIconContainer, { backgroundColor: colors.primary }]}>
+              <LinearGradient colors={GRADIENTS.light} style={styles.actionIconContainer}>
                 <Ionicons name="download" size={24} color="#FFFFFF" />
-              </View>
+              </LinearGradient>
               <View style={styles.actionInfo}>
                 <Text style={[styles.actionLabel, { color: colors.text }]}>
                   {isDownloading ? 'Downloading...' : 'Download for Offline'}

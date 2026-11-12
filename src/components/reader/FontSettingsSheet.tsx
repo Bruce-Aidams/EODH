@@ -57,6 +57,25 @@ export const FontSettingsSheet: React.FC<FontSettingsSheetProps> = ({
           </View>
 
           <ScrollView style={styles.settingsScroll}>
+            {/* Live Preview */}
+            <View style={[styles.previewBox, { backgroundColor: themeColors.background, borderColor: colors.border }]}>
+              <Text style={[styles.previewLabel, { color: themeColors.secondaryText }]}>Preview</Text>
+              <Text
+                style={[
+                  styles.previewText,
+                  {
+                    color: themeColors.text,
+                    fontSize: readingSettings.fontSize,
+                    lineHeight: readingSettings.fontSize * readingSettings.lineSpacing,
+                    fontFamily: readingSettings.fontFamily === 'System' ? 'System' : readingSettings.fontFamily,
+                    textAlign: readingSettings.textAlign,
+                  },
+                ]}
+              >
+                The quick brown fox jumps over the lazy dog. Reading is a journey of discovery.
+              </Text>
+            </View>
+
             {/* Theme */}
             <ThemeSelector
               selectedTheme={readingSettings.theme}
@@ -251,6 +270,22 @@ const styles = StyleSheet.create({
   },
   settingsScroll: {
     maxHeight: 400,
+  },
+  previewBox: {
+    padding: 16,
+    borderRadius: BORDER_RADIUS.md,
+    borderWidth: 1,
+    marginBottom: 20,
+  },
+  previewLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 8,
+  },
+  previewText: {
+    letterSpacing: 0.2,
   },
   settingRow: {
     marginBottom: 20,
